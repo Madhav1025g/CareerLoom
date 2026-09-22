@@ -2,7 +2,7 @@
 
 **AI career document platform: tailored resumes, cover letters, and ATS match scoring.**
 
-**Live app:** https://airesumegeneratoragent.streamlit.app/
+**Live app:** https://careerloom.streamlit.app/
 
 CareerLoom reads your resume and a job description, then generates a tailored resume, a matching cover letter, and an ATS match score with a clear gap analysis, all in one pass.
 
