@@ -58,8 +58,8 @@ assets/               # Favicon
 ## Running locally
 
 ```bash
-git clone https://github.com/Madhav1025g/Enterprise_AI_Resume_Generator_Agent.git
-cd Enterprise_AI_Resume_Generator_Agent
+git clone https://github.com/Madhav1025g/CareerLoom.git
+cd CareerLoom
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
