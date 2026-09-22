@@ -1,14 +1,17 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, model_validator
-from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
+import json
+import logging
+import os
+import re
+import secrets
 import time
 import uuid
-import os
 
-# NEW: optional free LLM provider (Groq)
+# Optional free LLM provider (Groq)
 try:
     from groq import Groq
 except ImportError:
@@ -18,27 +21,30 @@ except ImportError:
 # APP Initialization
 #----------------------
 
+APP_NAME = "CareerForge"
+
 app = FastAPI(
-    title="Enterprise AI Resume Generator Agent",
-    description="An API for generating professional resumes using AI, with RAG-based job-description matching",
-    version="2.0.0",
+    title=f"{APP_NAME} API",
+    description="AI career document platform: tailored resumes, cover letters, and ATS match scoring with RAG-based job-description matching",
+    version="3.0.0",
 )
 
 #----------------------
 # SECURITY CONFIG
 #----------------------
 
-valid_api_keys = {os.getenv("API_KEY_HERE")}
+# Only non-empty keys count — an unset API_KEY_HERE must never let an empty key through.
+valid_api_keys = {key for key in [os.getenv("API_KEY_HERE")] if key}
 api_key_value = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key_value) if api_key_value else None
 
-# NEW: LLM provider selection — defaults to Groq (free) if configured, falls back to OpenAI
+# LLM provider selection — defaults to Groq (free) if configured, falls back to OpenAI
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if (Groq and groq_api_key) else None
 
 #----------------------
-# RAG CONFIG (NEW)
+# RAG CONFIG
 #----------------------
 
 QDRANT_URL = os.getenv("QDRANT_URL")
@@ -50,11 +56,12 @@ embedding_model = None
 qdrant_client = None
 
 # Only load the heavy embedding/vector libraries if Qdrant is actually configured.
-# This keeps the app lightweight (and working) until you set up the RAG phase.
 if QDRANT_URL:
     from sentence_transformers import SentenceTransformer
     from qdrant_client import QdrantClient
-    from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+    from qdrant_client.models import (
+        Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, FilterSelector,
+    )
 
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
     qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
@@ -66,7 +73,6 @@ if QDRANT_URL:
         )
 
     # Qdrant requires a payload index to filter by a field (e.g. request_id).
-    # Creating it is idempotent-safe here — ignore the error if it already exists.
     try:
         qdrant_client.create_payload_index(
             collection_name=COLLECTION_NAME,
@@ -89,7 +95,7 @@ class ResumeRequest(BaseModel):
 
     resume_text: str | None = Field(None, max_length=90000)
     resume_file: str | None = None   # File path or uploaded file name
-    job_description: str | None = Field(None, max_length=20000)  # NEW: enables RAG matching
+    job_description: str | None = Field(None, max_length=20000)  # enables RAG matching
 
     @model_validator(mode="after")
     def validate_resume(self):
@@ -110,32 +116,41 @@ class ResumeRequest(BaseModel):
 #----------------------
 # LOGGING CONFIG
 #----------------------
-logs = []
-def log_event(message):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_message = f"[{timestamp}] {message}"
-    logs.append(log_message)
-    print(log_message)
 
-    with open("resume_generator_logs_LLM.txt", "a") as log_file:
-        log_file.write(log_message + "\n")
+# Logs go to stdout only (visible to the app owner in the hosting dashboard) — never to a file,
+# and never into API responses. Do NOT pass resume text, prompts, LLM output, or keys to log_event.
+logger = logging.getLogger("careerforge")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+
+def log_event(message):
+    logger.info(message)
 
 #----------------------
 # SECURITY VALIDATION
 #----------------------
 
 def verify_api_key(api_key):
-    if api_key not in valid_api_keys:
-        log_event(f"Unauthorized access attempt with API key: {api_key}")
+    # Constant-time comparison; the key itself is never logged.
+    if not any(secrets.compare_digest(api_key.encode(), valid.encode()) for valid in valid_api_keys):
+        log_event("Rejected request with an invalid API key")
         raise HTTPException(status_code=401, detail="Invalid API Key")
-    log_event(f"API key verified: {api_key}")
 
 #----------------------
 # LLM HELPER
 #----------------------
 
+class LLMUnavailableError(RuntimeError):
+    """Raised when no LLM provider could produce a response."""
+
+
 def call_llm(prompt):
-    # NEW: Groq path (free) — used when LLM_PROVIDER=groq and a key is configured
+    # Groq path (free) — used when LLM_PROVIDER=groq and a key is configured
     if LLM_PROVIDER == "groq" and groq_client is not None:
         try:
             response = groq_client.chat.completions.create(
@@ -146,10 +161,10 @@ def call_llm(prompt):
             )
             return response.choices[0].message.content
         except Exception as exc:
-            log_event(f"Groq call failed, falling back to OpenAI: {exc}")
+            log_event(f"Groq call failed ({type(exc).__name__}), falling back to OpenAI")
 
     if client is None:
-        return f"Simulated response for: {prompt}"
+        raise LLMUnavailableError("No LLM provider is configured or available.")
 
     try:
         response = client.chat.completions.create(
@@ -165,13 +180,48 @@ def call_llm(prompt):
         )
         return response.choices[0].message.content
     except Exception as exc:
-        print(f"OpenAI call failed: {exc}")
-        return f"Simulated response for: {prompt}"
-
-import re
+        log_event(f"OpenAI call failed ({type(exc).__name__})")
+        raise LLMUnavailableError("All LLM providers failed.") from exc
 
 #--------------------------------
-# GUARDRAIL: COMPLETENESS CHECK (NEW)
+# JSON PARSING HELPERS
+#--------------------------------
+
+def _extract_json(text, open_char, close_char):
+    """Pull a JSON value out of LLM output, tolerating markdown fences or surrounding prose."""
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+    start, end = cleaned.find(open_char), cleaned.rfind(close_char)
+    if start != -1 and end > start:
+        try:
+            return json.loads(cleaned[start:end + 1])
+        except Exception:
+            pass
+    return None
+
+
+def parse_json_list(text):
+    """Safely parse a JSON array from LLM output."""
+    data = _extract_json(text, "[", "]")
+    return data if isinstance(data, list) else []
+
+
+def parse_json_object(text):
+    """Safely parse a JSON object from LLM output."""
+    data = _extract_json(text, "{", "}")
+    return data if isinstance(data, dict) else {}
+
+#--------------------------------
+# GUARDRAIL: COMPLETENESS CHECK
 #--------------------------------
 
 def extract_entry_markers(text: str) -> list[str]:
@@ -199,7 +249,7 @@ def check_completeness(original_text: str, final_text: str) -> dict:
 
     missing = []
     for marker in original_markers:
-        years_in_marker = re.findall(r"(19|20)\d{2}", marker)
+        years_in_marker = re.findall(r"(?:19|20)\d{2}", marker)
         found = any(year in final_text for year in years_in_marker)
         if not found:
             missing.append(marker)
@@ -214,7 +264,7 @@ def check_completeness(original_text: str, final_text: str) -> dict:
     }
 
 #--------------------------------
-# RAG HELPERS (NEW)
+# RAG HELPERS
 #--------------------------------
 
 def chunk_resume(resume_text: str) -> list[str]:
@@ -239,7 +289,7 @@ def store_resume_chunks(request_id: str, chunks: list[str]):
         return
 
     points = []
-    for i, chunk in enumerate(chunks):
+    for chunk in chunks:
         vector = embed_text(chunk)
         points.append(
             PointStruct(
@@ -251,6 +301,22 @@ def store_resume_chunks(request_id: str, chunks: list[str]):
 
     qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
     log_event(f"{request_id}: stored {len(points)} resume chunks in Qdrant")
+
+
+def delete_resume_chunks(request_id: str):
+    """Remove this request's resume chunks from Qdrant so no resume content outlives the request."""
+    if qdrant_client is None:
+        return
+    try:
+        qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=FilterSelector(
+                filter=Filter(must=[FieldCondition(key="request_id", match=MatchValue(value=request_id))])
+            ),
+        )
+        log_event(f"{request_id}: deleted resume chunks from Qdrant")
+    except Exception as exc:
+        log_event(f"{request_id}: WARNING — failed to delete resume chunks ({type(exc).__name__})")
 
 
 def retrieve_relevant_chunks(request_id: str, job_description: str, top_k: int = 5) -> list[str]:
@@ -316,17 +382,24 @@ def analyzer_agent(user_request, request_id):
     Skills: {', '.join(user_request['skills'])}
     Experience: {user_request['experience_years']} years
 
-    Return only JSON with:
-    - candidate_level
-    - primary_domain
-    - years_experience
+    Return ONLY JSON (no prose, no markdown fences):
+    {{
+      "candidate_level": "Entry Level" | "Mid-Level" | "Senior Level" | "Lead / Principal",
+      "primary_domain": "short domain name, e.g. Backend Engineering",
+      "years_experience": 0
+    }}
     """
 
     output = call_llm(prompt)
+    parsed = parse_json_object(output)
 
-    log_event(f"Analyzer output: {output}")
+    log_event(f"{request_id}: Analyzer completed (parsed={bool(parsed)})")
 
-    return output
+    return {
+        "candidate_level": parsed.get("candidate_level"),
+        "primary_domain": parsed.get("primary_domain"),
+        "years_experience": parsed.get("years_experience", user_request["experience_years"]),
+    }
 
 #----------------------
 # ATS SCORE CALCULATOR
@@ -350,7 +423,7 @@ def calculate_ats_score(resume_text: str, skills: list[str]) -> int:
     return max(0, min(score, 100))
 
 #------------------------
-# ATS OPTIMIZATION AGENT (UPDATED — now RAG-aware)
+# ATS OPTIMIZATION AGENT (RAG-aware)
 #------------------------
 
 def ats_agent(user_request, matched_chunks=None, semantic_score=None):
@@ -400,22 +473,36 @@ def ats_agent(user_request, matched_chunks=None, semantic_score=None):
     missing_keywords = parsed.get("missing_keywords", []) if isinstance(parsed.get("missing_keywords"), list) else []
     explanation = parsed.get("explanation", "")
 
-    log_event(f"ATS Output: {output} | keyword_score={keyword_score} semantic_score={semantic_score}")
+    log_event(f"ATS completed | keyword_score={keyword_score} semantic_score={semantic_score} final={final_score}")
 
     return {
         "llm_feedback": output,
         "ats_score": final_score,
+        "keyword_score": keyword_score,
+        "semantic_score": semantic_score,
         "missing_keywords": missing_keywords,
         "explanation": explanation,
     }
 
 #----------------------
-# RESUME WRITER AGENT (UPDATED — uses RAG-matched content when available)
+# SHARED OUTPUT FORMAT RULES
 #----------------------
 
-def resume_writer_agent(user_request, matched_chunks=None):
+# The exporters (PDF/DOCX/preview) rely on this layout to produce a professionally formatted document.
+RESUME_FORMAT_RULES = """
+    Output format rules (follow exactly):
+    - Output plain text only. Do NOT use Markdown: no **bold**, no # headings, no backticks.
+    - Line 1: the candidate's full name only.
+    - Line 2: contact details from the source (email, phone, location, links) separated by " | ". Omit if none are given.
+    - Section headers on their own line in ALL CAPS (e.g. PROFESSIONAL SUMMARY, EXPERIENCE, PROJECTS, TECHNICAL SKILLS, EDUCATION, CERTIFICATIONS).
+    - Each job or project starts with one header line containing the title, company/organization, location, and dates, separated by " | ".
+    - Use plain bullet points starting with "- " for achievements. Never use tables, pipes-as-columns grids, or multi-column layouts.
+    - Format TECHNICAL SKILLS as one category per line, e.g. "Languages: Python, JavaScript".
+    """
 
-    log_event("Resume Writer Agent Started")
+#----------------------
+# RESUME WRITER AGENT (uses RAG-matched content when available)
+#----------------------
 
 def resume_writer_agent(user_request, matched_chunks=None):
 
@@ -449,15 +536,7 @@ def resume_writer_agent(user_request, matched_chunks=None):
     Full source resume content (this is the complete and only source of truth — use ALL of it):
     {full_resume_text}
     {emphasis_section}
-
-    Formatting rules (follow exactly):
-    - Do NOT use tables (no pipe characters, no multi-column layouts) anywhere in the resume.
-    - Format the Technical Skills section as simple grouped bullet points, one category per line, e.g.:
-      Languages: Python, JavaScript
-      Frameworks: FastAPI, React
-      Cloud & DevOps: AWS, Docker, Terraform
-    - Use plain bullet points (-) for experience and skills, never a grid or table.
-    - Use clear section headers in plain text (e.g. "PROFESSIONAL SUMMARY", "EXPERIENCE", "TECHNICAL SKILLS").
+    {RESUME_FORMAT_RULES}
     - CRITICAL: Include every distinct job, company, and project mentioned in the full source content above,
       with their real company names and dates exactly as given. NEVER write placeholders like "[Not Provided]"
       or "[Company Name]" — if a detail is in the source text, use it verbatim; do not omit, merge, or
@@ -493,11 +572,7 @@ def human_optimizer_agent(user_request, resume_text):
     - Remove AI generated patterns
     - Professional
     - ATS Friendly
-
-    Formatting rules (follow exactly):
-    - Do NOT use tables or multi-column layouts anywhere (no pipe characters).
-    - Keep the Technical Skills section as grouped bullet points, one category per line.
-    - Use plain bullet points (-) throughout, never a grid or table.
+    {RESUME_FORMAT_RULES}
     - CRITICAL: Preserve every distinct job, company, and project entry from the resume below.
       Do not drop, merge, or summarize away any entry while rewriting — the output must contain
       the exact same number of jobs/projects as the input, just better-written.
@@ -517,45 +592,8 @@ def human_optimizer_agent(user_request, resume_text):
 
     return output
 
-import json
-
-def parse_json_list(text):
-    """Safely parse a JSON array from LLM output, stripping markdown fences if present."""
-    if not text:
-        return []
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:]
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, list):
-            return data
-    except Exception:
-        pass
-    return []
-
-
-def parse_json_object(text):
-    """Safely parse a JSON object from LLM output, stripping markdown fences if present."""
-    if not text:
-        return {}
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:]
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    return {}
-
 #----------------------
-# REVIEWER AGENT (UPDATED — reviews the FINAL resume, returns structured suggestions)
+# REVIEWER AGENT (reviews the FINAL resume, returns structured suggestions)
 #----------------------
 
 def reviewer_agent(resume_text):
@@ -587,8 +625,9 @@ def reviewer_agent(resume_text):
     # Safety net: drop any no-op or empty suggestions even if the model ignored the instruction above
     suggestions = [
         s for s in suggestions
-        if s.get("suggested_fix", "").strip()
-        and s.get("suggested_fix", "").strip() != s.get("current_text", "").strip()
+        if isinstance(s, dict)
+        and str(s.get("suggested_fix", "")).strip()
+        and str(s.get("suggested_fix", "")).strip() != str(s.get("current_text", "")).strip()
     ]
 
     log_event(f"Reviewer completed with {len(suggestions)} suggestions")
@@ -599,7 +638,7 @@ def reviewer_agent(resume_text):
     }
 
 #----------------------
-# COVER LETTER AGENT (NEW)
+# COVER LETTER AGENT
 #----------------------
 
 def cover_letter_agent(user_request, matched_chunks=None):
@@ -628,6 +667,7 @@ def cover_letter_agent(user_request, matched_chunks=None):
     {jd_instruction}
 
     Write in first person, professional but not stiff. If no company name is given, address it "Dear Hiring Manager,". Do not include placeholder brackets like [Company Name] unless a real company name was provided in the job description.
+    Output plain text only (no Markdown). Start with the salutation and end with "Sincerely," followed by the candidate's name on the next line. Separate paragraphs with a blank line.
     """
 
     letter = call_llm(prompt)
@@ -641,11 +681,22 @@ def cover_letter_agent(user_request, matched_chunks=None):
     return output
 
 #----------------------
-# ORCHESTRATOR (UPDATED — adds RAG step, cover letter, and progress callback)
+# ORCHESTRATOR (RAG step, 7-step pipeline, progress callback)
 #----------------------
 
+PIPELINE_STEPS = [
+    ("Profile Analyzer", "Reads your background and determines your experience level and domain."),
+    ("ATS Match", "Scores your resume against the job using semantic (RAG) and keyword matching."),
+    ("Resume Writer", "Drafts a tailored resume using your full resume as the only source of truth."),
+    ("Human Optimizer", "Polishes the draft so it reads naturally, not like AI-generated text."),
+    ("Completeness Check", "A guardrail that flags any job or project that may have been dropped."),
+    ("Reviewer", "Checks grammar, formatting, and consistency, with one-click fixes."),
+    ("Cover Letter Writer", "Drafts a matching cover letter tailored to the same role."),
+]
+
+
 def orchestrator(user_request, request_id, progress_callback=None):
-    log_event(f"Orchestrator received request: {user_request}")
+    log_event(f"{request_id}: Orchestrator started")
     start = time.time()
 
     def notify(message):
@@ -659,54 +710,46 @@ def orchestrator(user_request, request_id, progress_callback=None):
     resume_text = user_request.get("resume_text")
     job_description = user_request.get("job_description")
 
-    notify("Reading and chunking resume...")
-    if resume_text:
-        chunks = chunk_resume(resume_text)
-        store_resume_chunks(request_id, chunks)
+    try:
+        notify("Reading your resume...")
+        if resume_text:
+            chunks = chunk_resume(resume_text)
+            store_resume_chunks(request_id, chunks)
 
-        if job_description:
-            notify("Matching resume to job description...")
-            matched_chunks = retrieve_relevant_chunks(request_id, job_description)
-            semantic_score = semantic_ats_score(job_description, matched_chunks)
+            if job_description:
+                notify("Matching your resume to the job description...")
+                matched_chunks = retrieve_relevant_chunks(request_id, job_description)
+                semantic_score = semantic_ats_score(job_description, matched_chunks)
+    finally:
+        # Resume chunks are only needed for retrieval — never keep them beyond this request.
+        delete_resume_chunks(request_id)
 
-    notify("Analyzing candidate profile...")
+    notify("Analyzing your profile...")
     analyzer_output = analyzer_agent(user_request, request_id)
 
-    notify("Scoring ATS match...")
+    notify("Scoring your ATS match...")
     ats_output = ats_agent(user_request, matched_chunks=matched_chunks, semantic_score=semantic_score)
 
-    notify("Writing first draft of resume...")
+    notify("Writing your tailored resume...")
     resume_writer_output = resume_writer_agent(user_request, matched_chunks=matched_chunks)
 
-    notify("Polishing into a human-friendly final version...")
+    notify("Polishing the final version...")
     human_optimizer_output = human_optimizer_agent(user_request, resume_writer_output["generated_resume"])
 
-    notify("Running content completeness check...")
+    notify("Checking that nothing was dropped...")
     final_resume_text = human_optimizer_output["human_friendly_resume"]
     completeness_output = check_completeness(resume_text, final_resume_text)
     if completeness_output["possibly_missing"]:
-        log_event(f"{request_id}: WARNING — possibly dropped entries: {completeness_output['possibly_missing']}")
+        log_event(f"{request_id}: WARNING — {len(completeness_output['possibly_missing'])} entries possibly dropped")
 
-    notify("Reviewing final resume for grammar and consistency...")
+    notify("Reviewing grammar and consistency...")
     reviewer_output = reviewer_agent(final_resume_text)
 
-    notify("Drafting a matching cover letter...")
+    notify("Drafting your cover letter...")
     cover_letter_output = cover_letter_agent(user_request, matched_chunks=matched_chunks)
 
-    notify("Finalizing...")
-
-    final_output = {
-        "analyzer": analyzer_output,
-        "ats_optimization": ats_output,
-        "resume_writer": resume_writer_output,
-        "human_optimizer": human_optimizer_output,
-        "reviewer": reviewer_output,
-        "cover_letter": cover_letter_output,
-        "completeness_check": completeness_output,
-    }
-    end = time.time()
-    execution_time = round(end - start, 2)
-    log_event(f"Orchestrator execution time: {execution_time}")
+    execution_time = round(time.time() - start, 2)
+    log_event(f"{request_id}: Orchestrator finished in {execution_time}s")
 
     return {
         "status": "success",
@@ -722,8 +765,6 @@ def orchestrator(user_request, request_id, progress_callback=None):
             "cover_letter": cover_letter_output,
             "completeness_check": completeness_output,
         },
-        "final_report": final_output,
-        "logs": logs,
     }
 
 #----------------------
@@ -731,7 +772,7 @@ def orchestrator(user_request, request_id, progress_callback=None):
 #----------------------
 @app.get("/")
 def home():
-    return {"message": "Welcome to the Enterprise AI Resume Generator Agent API!"}
+    return {"message": f"Welcome to the {APP_NAME} API!"}
 
 #----------------------
 # MAIN API ENDPOINT
@@ -744,9 +785,10 @@ def generate_resume(request: ResumeRequest):
     verify_api_key(request.api_key)
 
     # WORKFLOW EXECUTION
-    result = orchestrator(request.model_dump(), request_id)
-
-    return result
+    try:
+        return orchestrator(request.model_dump(), request_id)
+    except LLMUnavailableError:
+        raise HTTPException(status_code=503, detail="The AI service is temporarily unavailable. Please try again shortly.")
 
 
 if __name__ == "__main__":

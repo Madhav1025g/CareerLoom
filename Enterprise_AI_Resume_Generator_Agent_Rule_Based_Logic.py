@@ -72,17 +72,18 @@ def log_event(message):
 #----------------------
 
 def verify_api_key(api_key):
+    # Never log the key itself.
     if api_key not in valid_api_keys:
-        log_event(f"Unauthorized access attempt with API key: {api_key}")
+        log_event("Unauthorized access attempt with an invalid API key")
         raise HTTPException(status_code=401, detail="Invalid API Key")
-    log_event(f"API key verified: {api_key}")
+    log_event("API key verified")
 
 #----------------------
 # PROFILE ANALYZER AGENT
 #----------------------
 
 def analyzer_agent(user_request, request_id):
-    log_event(f"{request_id}: Analyzer agent received request: {user_request}")
+    log_event(f"{request_id}: Analyzer agent received request")
     #responsibilities = user_request.get("responsibilities", ["Analyze resume content, identify strengths and weaknesses, and provide actionable recommendations for improvement., Skills assessment, experience evaluation, projects review, and role alignment analysis., education and certification review, career trajectory analysis, and industry relevance assessment"])
     years = user_request["experience_years"]
     if years < 2:
@@ -124,7 +125,7 @@ def calculate_ats_score(resume_text: str, skills: list[str]) -> int:
 #------------------------
 
 def ats_agent(user_request):
-    log_event(f"ATS agent received request: {user_request}")
+    log_event(f"ATS agent received request")
     #responsibilities = user_request.get("responsibilities", ["identify ATS keywords from resume text or file, improve formatting, and enhance content to match job descriptions, optimize skill alignment, and ensure compliance with ATS parsing standards., improve role targeting, and enhance overall resume effectiveness."])
     missing = []
     score = calculate_ats_score(user_request.get("resume_text", ""), user_request.get("skills", []))
@@ -141,7 +142,7 @@ def ats_agent(user_request):
 #----------------------
 
 def resume_writer_agent(user_request):
-    log_event(f"Resume Writer agent received request: {user_request}")
+    log_event(f"Resume Writer agent received request")
     #responsibilities = user_request.get("responsibilities", ["Generate a professional resume based on the provided information, including full name, current role, skills, experience years, and any additional details., Ensure the resume is well-structured, ATS-friendly, and highlights key achievements and qualifications., Tailor the resume to specific job roles or industries as requested., experience bullets, skills section, project descriptions, formatting, layout, and overall presentation of the resume."])
     resume = f"""
     Name: {user_request['full_name']}
@@ -181,7 +182,7 @@ def human_optimizer_agent(user_request, resume_text):
 #----------------------
 
 def reviewer_agent(user_request):
-    log_event(f"Reviewer agent received request: {user_request}")
+    log_event(f"Reviewer agent received request")
     #responsibilities = user_request.get("responsibilities", ["Review the generated resume for accuracy, clarity, and overall quality., Provide feedback on content, structure, and presentation., Suggest improvements to enhance the resume's effectiveness and impact., check grammar and spelling., consistency and formatting structure., Enterprise professionalism."])
     feedback = []
     if len(user_request["skills"]) < 5:
@@ -203,7 +204,7 @@ def reviewer_agent(user_request):
 #----------------------
 
 def orchestrator(user_request, request_id):
-    log_event(f"Orchestrator received request: {user_request}")
+    log_event(f"Orchestrator received request")
     start = time.time()
     analyzer_output = analyzer_agent(user_request, request_id)
     ats_output = ats_agent(user_request)
