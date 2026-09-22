@@ -2,15 +2,53 @@
 Turns plain-text resumes and cover letters into professionally formatted documents.
 
 A single parser (parse_resume) classifies each line, and three renderers share it so the
-on-screen preview, the PDF, and the DOCX always look alike.
+on-screen preview, the PDF, and the DOCX always look alike. Each renderer takes a template
+name from TEMPLATES, which controls typography, color, alignment, and density.
 """
 import html
 import io
 import re
 
-ACCENT_RGB = (30, 58, 138)     # CareerLoom navy
 MUTED_RGB = (100, 110, 125)
 TEXT_RGB = (17, 24, 39)
+
+# Every template field is used by all three renderers (HTML preview, PDF, DOCX).
+TEMPLATES = {
+    "Professional": {
+        "description": "Centered header, navy accents, clean sans-serif.",
+        "accent": (30, 58, 138), "align": "C", "heading": "rule",
+        "pdf_font": "Helvetica", "docx_font": "Calibri", "html_font": "Inter, Helvetica, Arial, sans-serif",
+        "name_size": 20, "body_size": 9.8, "heading_size": 10.5, "line": 5.0, "margin": 18, "gap": 3.5,
+    },
+    "Modern": {
+        "description": "Left-aligned header, teal accent bars, contemporary feel.",
+        "accent": (15, 118, 110), "align": "L", "heading": "bar",
+        "pdf_font": "Helvetica", "docx_font": "Calibri", "html_font": "Inter, Helvetica, Arial, sans-serif",
+        "name_size": 22, "body_size": 9.8, "heading_size": 10.5, "line": 5.0, "margin": 18, "gap": 4.0,
+    },
+    "Classic": {
+        "description": "Traditional serif typography in charcoal — ideal for finance, law, and academia.",
+        "accent": (31, 41, 55), "align": "C", "heading": "rule",
+        "pdf_font": "Times", "docx_font": "Georgia", "html_font": "Georgia, 'Times New Roman', serif",
+        "name_size": 21, "body_size": 10.5, "heading_size": 11, "line": 5.2, "margin": 20, "gap": 3.5,
+    },
+    "Compact": {
+        "description": "Smaller type and tighter spacing to fit more on one page.",
+        "accent": (30, 58, 138), "align": "C", "heading": "rule",
+        "pdf_font": "Helvetica", "docx_font": "Calibri", "html_font": "Inter, Helvetica, Arial, sans-serif",
+        "name_size": 16, "body_size": 8.8, "heading_size": 9.5, "line": 4.3, "margin": 12, "gap": 2.2,
+    },
+}
+DEFAULT_TEMPLATE = "Professional"
+
+
+def _template(name: str | None) -> dict:
+    return TEMPLATES.get(name or DEFAULT_TEMPLATE, TEMPLATES[DEFAULT_TEMPLATE])
+
+
+def _hex(rgb) -> str:
+    return "#%02X%02X%02X" % rgb
+
 
 _BULLET_RE = re.compile(r"^\s*(?:[-*•–●▪]|\d+[.)])\s+")
 _LABEL_RE = re.compile(r"^([A-Z][A-Za-z0-9 &/+.,()-]{1,40}):\s+(.+)$")
@@ -78,7 +116,16 @@ def _strip_markdown_block(text: str) -> str:
 # HTML preview (rendered inside the Streamlit page)
 # ------------------------------------------------------------------
 
-def resume_to_html(text: str) -> str:
+def _html_vars(t: dict) -> str:
+    return (
+        f"--doc-accent:{_hex(t['accent'])};--doc-font:{t['html_font']};"
+        f"--doc-align:{'left' if t['align'] == 'L' else 'center'};"
+        f"--doc-size:{t['body_size'] / 9.8 * 0.9:.3f}rem;"
+    )
+
+
+def resume_to_html(text: str, template: str | None = None) -> str:
+    t = _template(template)
     parts = []
     in_list = False
     for kind, value in parse_resume(text):
@@ -91,7 +138,7 @@ def resume_to_html(text: str) -> str:
         elif kind == "contact":
             parts.append(f'<div class="cl-contact">{safe}</div>')
         elif kind == "heading":
-            parts.append(f'<div class="cl-heading">{safe}</div>')
+            parts.append(f'<div class="cl-heading cl-heading-{t["heading"]}">{safe}</div>')
         elif kind == "entry":
             parts.append(f'<div class="cl-entry">{safe}</div>')
         elif kind == "bullet":
@@ -106,17 +153,18 @@ def resume_to_html(text: str) -> str:
             parts.append(f"<p>{safe}</p>")
     if in_list:
         parts.append("</ul>")
-    return '<div class="cl-doc">' + "".join(parts) + "</div>"
+    return f'<div class="cl-doc" style="{_html_vars(t)}">' + "".join(parts) + "</div>"
 
 
-def letter_to_html(text: str) -> str:
+def letter_to_html(text: str, template: str | None = None) -> str:
+    t = _template(template)
     paragraphs = "".join(
         "<p>" + html.escape(p).replace("\n", "<br>") + "</p>" for p in parse_letter(text)
     )
-    return f'<div class="cl-doc cl-letter">{paragraphs}</div>'
+    return f'<div class="cl-doc cl-letter" style="{_html_vars(t)}">{paragraphs}</div>'
 
 # ------------------------------------------------------------------
-# PDF (fpdf2, core Helvetica font)
+# PDF (fpdf2, core fonts)
 # ------------------------------------------------------------------
 
 _LATIN1_REPLACEMENTS = {
@@ -138,87 +186,97 @@ def _pdf_safe(text: str) -> str:
     )
 
 
-def _new_pdf():
+def _new_pdf(margin: float):
     from fpdf import FPDF
 
     pdf = FPDF(format="Letter")
-    pdf.set_margins(18, 16, 18)
-    pdf.set_auto_page_break(auto=True, margin=16)
+    pdf.set_margins(margin, margin * 0.9, margin)
+    pdf.set_auto_page_break(auto=True, margin=margin * 0.9)
     pdf.add_page()
     pdf.set_text_color(*TEXT_RGB)
     return pdf
 
 
-def build_resume_pdf(text: str) -> bytes:
-    pdf = _new_pdf()
+def build_resume_pdf(text: str, template: str | None = None) -> bytes:
+    t = _template(template)
+    font, body, line = t["pdf_font"], t["body_size"], t["line"]
+    pdf = _new_pdf(t["margin"])
     width = pdf.w - pdf.l_margin - pdf.r_margin
 
     for kind, value in parse_resume(text):
         value = _pdf_safe(value)
         pdf.set_x(pdf.l_margin)
         if kind == "name":
-            pdf.set_font("Helvetica", "B", 20)
-            pdf.set_text_color(*ACCENT_RGB)
-            pdf.cell(width, 10, value, align="C", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(font, "B", t["name_size"])
+            pdf.set_text_color(*t["accent"])
+            pdf.cell(width, t["name_size"] * 0.5, value, align=t["align"], new_x="LMARGIN", new_y="NEXT")
             pdf.set_text_color(*TEXT_RGB)
         elif kind == "contact":
-            pdf.set_font("Helvetica", "", 9)
+            pdf.set_font(font, "", body - 0.8)
             pdf.set_text_color(*MUTED_RGB)
-            pdf.multi_cell(width, 4.6, value, align="C", new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(width, line - 0.4, value, align=t["align"], new_x="LMARGIN", new_y="NEXT")
             pdf.set_text_color(*TEXT_RGB)
         elif kind == "heading":
-            pdf.ln(3.5)
-            pdf.set_font("Helvetica", "B", 10.5)
-            pdf.set_text_color(*ACCENT_RGB)
-            pdf.cell(width, 6, value, new_x="LMARGIN", new_y="NEXT")
-            pdf.set_draw_color(*ACCENT_RGB)
-            pdf.set_line_width(0.35)
-            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + width, pdf.get_y())
-            pdf.ln(1.8)
+            pdf.ln(t["gap"])
+            pdf.set_font(font, "B", t["heading_size"])
+            pdf.set_text_color(*t["accent"])
+            if t["heading"] == "bar":
+                y = pdf.get_y()
+                pdf.set_fill_color(*t["accent"])
+                pdf.rect(pdf.l_margin, y + 0.8, 1.2, t["heading_size"] * 0.42, style="F")
+                pdf.set_x(pdf.l_margin + 3.5)
+                pdf.cell(width - 3.5, line + 1, value, new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(0.8)
+            else:
+                pdf.cell(width, line + 1, value, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_draw_color(*t["accent"])
+                pdf.set_line_width(0.35)
+                pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + width, pdf.get_y())
+                pdf.ln(t["gap"] * 0.5)
             pdf.set_text_color(*TEXT_RGB)
         elif kind == "entry":
-            pdf.ln(1.2)
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.multi_cell(width, 5.2, value, new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(t["gap"] * 0.35)
+            pdf.set_font(font, "B", body + 0.2)
+            pdf.multi_cell(width, line + 0.2, value, new_x="LMARGIN", new_y="NEXT")
         elif kind == "bullet":
-            pdf.set_font("Helvetica", "", 9.8)
+            pdf.set_font(font, "", body)
             y = pdf.get_y()
             pdf.set_fill_color(*TEXT_RGB)
-            pdf.ellipse(pdf.l_margin + 1.6, y + 2.05, 1.1, 1.1, style="F")
+            pdf.ellipse(pdf.l_margin + 1.6, y + line * 0.41, 1.1, 1.1, style="F")
             pdf.set_x(pdf.l_margin + 5)
-            pdf.multi_cell(width - 5, 5, value, new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(width - 5, line, value, new_x="LMARGIN", new_y="NEXT")
         elif kind == "label":
             label, rest = _LABEL_RE.match(value).groups()
-            pdf.set_font("Helvetica", "B", 9.8)
-            pdf.write(5, f"{label}: ")
-            pdf.set_font("Helvetica", "", 9.8)
-            pdf.write(5, rest)
-            pdf.ln(5)
+            pdf.set_font(font, "B", body)
+            pdf.write(line, f"{label}: ")
+            pdf.set_font(font, "", body)
+            pdf.write(line, rest)
+            pdf.ln(line)
         else:
-            pdf.set_font("Helvetica", "", 9.8)
-            pdf.multi_cell(width, 5, value, new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(font, "", body)
+            pdf.multi_cell(width, line, value, new_x="LMARGIN", new_y="NEXT")
 
     return bytes(pdf.output())
 
 
-def build_letter_pdf(text: str, sender_name: str = "") -> bytes:
-    pdf = _new_pdf()
-    pdf.set_margins(25, 22, 25)
-    pdf.set_y(22)
+def build_letter_pdf(text: str, sender_name: str = "", template: str | None = None) -> bytes:
+    t = _template(template)
+    font = t["pdf_font"]
+    pdf = _new_pdf(25)
     width = pdf.w - pdf.l_margin - pdf.r_margin
 
     if sender_name:
         pdf.set_x(pdf.l_margin)
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(*ACCENT_RGB)
+        pdf.set_font(font, "B", 16)
+        pdf.set_text_color(*t["accent"])
         pdf.cell(width, 9, _pdf_safe(sender_name), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(*ACCENT_RGB)
+        pdf.set_draw_color(*t["accent"])
         pdf.set_line_width(0.35)
         pdf.line(pdf.l_margin, pdf.get_y() + 1, pdf.l_margin + width, pdf.get_y() + 1)
         pdf.ln(9)
         pdf.set_text_color(*TEXT_RGB)
 
-    pdf.set_font("Helvetica", "", 10.5)
+    pdf.set_font(font, "", 10.5 if font != "Times" else 11.5)
     for paragraph in parse_letter(text):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(width, 5.6, _pdf_safe(paragraph), new_x="LMARGIN", new_y="NEXT")
@@ -230,34 +288,34 @@ def build_letter_pdf(text: str, sender_name: str = "") -> bytes:
 # DOCX (python-docx)
 # ------------------------------------------------------------------
 
-def _new_docx(margin_inches: float):
+def _new_docx(margin_inches: float, t: dict):
     import docx
     from docx.shared import Inches, Pt, RGBColor
 
     document = docx.Document()
     for section in document.sections:
         section.left_margin = section.right_margin = Inches(margin_inches)
-        section.top_margin = section.bottom_margin = Inches(0.6)
+        section.top_margin = section.bottom_margin = Inches(min(margin_inches, 0.6))
     normal = document.styles["Normal"]
-    normal.font.name = "Calibri"
-    normal.font.size = Pt(10.5)
+    normal.font.name = t["docx_font"]
+    normal.font.size = Pt(t["body_size"] + 0.7)
     normal.font.color.rgb = RGBColor(*TEXT_RGB)
-    normal.paragraph_format.space_after = Pt(2)
+    normal.paragraph_format.space_after = Pt(2 if t["gap"] >= 3 else 1)
     return document
 
 
-def _add_bottom_border(paragraph):
+def _add_border(paragraph, side: str, color_rgb, size: int = 6):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
     p_pr = paragraph._p.get_or_add_pPr()
     borders = OxmlElement("w:pBdr")
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), "6")
-    bottom.set(qn("w:space"), "1")
-    bottom.set(qn("w:color"), "%02X%02X%02X" % ACCENT_RGB)
-    borders.append(bottom)
+    edge = OxmlElement(f"w:{side}")
+    edge.set(qn("w:val"), "single")
+    edge.set(qn("w:sz"), str(size))
+    edge.set(qn("w:space"), "4" if side == "left" else "1")
+    edge.set(qn("w:color"), "%02X%02X%02X" % color_rgb)
+    borders.append(edge)
     p_pr.append(borders)
 
 
@@ -267,37 +325,42 @@ def _docx_bytes(document) -> bytes:
     return buffer.getvalue()
 
 
-def build_resume_docx(text: str) -> bytes:
+def build_resume_docx(text: str, template: str | None = None) -> bytes:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt, RGBColor
 
-    document = _new_docx(0.75)
+    t = _template(template)
+    align = WD_ALIGN_PARAGRAPH.LEFT if t["align"] == "L" else WD_ALIGN_PARAGRAPH.CENTER
+    document = _new_docx(t["margin"] / 25.4, t)
     for kind, value in parse_resume(text):
         if kind == "name":
             p = document.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.alignment = align
             run = p.add_run(value)
             run.bold = True
-            run.font.size = Pt(20)
-            run.font.color.rgb = RGBColor(*ACCENT_RGB)
+            run.font.size = Pt(t["name_size"])
+            run.font.color.rgb = RGBColor(*t["accent"])
         elif kind == "contact":
             p = document.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.alignment = align
             run = p.add_run(value)
-            run.font.size = Pt(9)
+            run.font.size = Pt(t["body_size"] - 0.8)
             run.font.color.rgb = RGBColor(*MUTED_RGB)
         elif kind == "heading":
             p = document.add_paragraph()
-            p.paragraph_format.space_before = Pt(10)
+            p.paragraph_format.space_before = Pt(t["gap"] * 2.8)
             p.paragraph_format.space_after = Pt(4)
             run = p.add_run(value)
             run.bold = True
-            run.font.size = Pt(11)
-            run.font.color.rgb = RGBColor(*ACCENT_RGB)
-            _add_bottom_border(p)
+            run.font.size = Pt(t["heading_size"] + 0.5)
+            run.font.color.rgb = RGBColor(*t["accent"])
+            if t["heading"] == "bar":
+                _add_border(p, "left", t["accent"], size=18)
+            else:
+                _add_border(p, "bottom", t["accent"])
         elif kind == "entry":
             p = document.add_paragraph()
-            p.paragraph_format.space_before = Pt(4)
+            p.paragraph_format.space_before = Pt(t["gap"])
             p.add_run(value).bold = True
         elif kind == "bullet":
             document.add_paragraph(value, style="List Bullet")
@@ -311,18 +374,19 @@ def build_resume_docx(text: str) -> bytes:
     return _docx_bytes(document)
 
 
-def build_letter_docx(text: str, sender_name: str = "") -> bytes:
+def build_letter_docx(text: str, sender_name: str = "", template: str | None = None) -> bytes:
     from docx.shared import Pt, RGBColor
 
-    document = _new_docx(1.0)
+    t = _template(template)
+    document = _new_docx(1.0, t)
     if sender_name:
         p = document.add_paragraph()
         p.paragraph_format.space_after = Pt(14)
         run = p.add_run(sender_name)
         run.bold = True
         run.font.size = Pt(16)
-        run.font.color.rgb = RGBColor(*ACCENT_RGB)
-        _add_bottom_border(p)
+        run.font.color.rgb = RGBColor(*t["accent"])
+        _add_border(p, "bottom", t["accent"])
     for paragraph in parse_letter(text):
         p = document.add_paragraph()
         p.paragraph_format.space_after = Pt(10)

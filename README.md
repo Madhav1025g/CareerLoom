@@ -10,22 +10,24 @@ CareerLoom reads your resume and a job description, then generates a tailored re
 
 - Upload your resume (PDF, DOCX, or TXT) or paste it directly
 - Paste a job description for semantically matched, tailored output
-- ATS match score (semantic + keyword) with missing skills and a plain-English explanation
+- **ATS score before vs. after** tailoring, shown as a chart, with missing skills and a plain-English explanation
 - Rewritten, ATS-friendly resume plus a matching cover letter
-- Reviewer suggestions with one-click **Apply**
-- Professionally formatted **PDF** and **Word** exports, plus plain text
+- **Recruiter snapshot**: a half-page version a recruiter can scan in 10–15 seconds
+- Reviewer suggestions with one-click **Apply**, plus **in-page editing** of every document
+- **Four templates** (Professional, Modern, Classic, Compact) for **PDF** and **Word** exports, plus plain text
 
 ## How it works
 
-A 7-step multi-agent pipeline:
+An 8-step multi-agent pipeline. Independent agents run in parallel to cut generation time:
 
 1. **Profile Analyzer**: determines experience level and domain
 2. **ATS Match**: scores the resume against the job using RAG-based semantic matching plus keyword matching
 3. **Resume Writer**: drafts a tailored resume using the full resume as the only source of truth
 4. **Human Optimizer**: polishes the draft so it reads naturally
-5. **Completeness Check**: a guardrail that flags any job or project that may have been dropped
+5. **Completeness Check**: a guardrail that flags dropped jobs and rejects broken AI output (falling back to the draft)
 6. **Reviewer**: checks grammar, formatting, and consistency, returning applicable fixes
-7. **Cover Letter Writer**: drafts a matching cover letter
+7. **Recruiter Snapshot**: condenses the resume into a 10–15 second, half-page summary
+8. **Cover Letter Writer**: drafts a matching cover letter
 
 Job-description matching uses a **RAG pipeline** (Sentence-Transformers embeddings + Qdrant vector search).
 
@@ -50,9 +52,19 @@ Job-description matching uses a **RAG pipeline** (Sentence-Transformers embeddin
 ```
 streamlit_app.py      # Web UI
 main.py               # Agents, orchestrator, RAG, and FastAPI endpoint
-document_builder.py   # Resume/cover letter formatting for preview, PDF, and DOCX
+document_builder.py   # Templates + formatting for preview, PDF, and DOCX
+tests/                # Automated tests (pytest)
 .streamlit/config.toml  # Theme
 assets/               # Favicon
+```
+
+## Tests
+
+The test suite runs offline with a fake LLM and embedding model (no API keys needed):
+
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## Running locally

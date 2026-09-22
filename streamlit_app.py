@@ -18,8 +18,13 @@ try:
 except Exception:
     pass
 
-from main import APP_NAME, PIPELINE_STEPS, LLMUnavailableError, log_event, orchestrator
+import altair as alt
+import pandas as pd
+
+from main import APP_NAME, PIPELINE_STEPS, LLMUnavailableError, ResumeGenerationError, log_event, orchestrator
 from document_builder import (
+    DEFAULT_TEMPLATE,
+    TEMPLATES,
     build_letter_docx,
     build_letter_pdf,
     build_resume_docx,
@@ -65,17 +70,21 @@ header[data-testid="stHeader"] { background: transparent; }
 .cl-card-title { font-weight: 600; font-size: 1rem; color: #0F172A; margin-bottom: 0.2rem; }
 .cl-privacy { font-size: 0.82rem; color: #64748B; text-align: center; margin-top: 0.6rem; }
 
+/* Document preview — template values arrive as CSS variables from document_builder */
 .cl-doc { background: #fff; border: 1px solid #E3E7EF; border-radius: 10px; padding: 2.2rem 2.5rem;
           box-shadow: 0 1px 3px rgba(15,23,42,.05), 0 10px 30px rgba(15,23,42,.06);
-          color: #111827; font-size: 0.9rem; line-height: 1.5; max-height: 1000px; overflow-y: auto; }
-.cl-doc p { margin: 0.12rem 0 !important; font-size: 0.9rem !important; }
+          color: #111827; font-size: var(--doc-size, 0.9rem); line-height: 1.5; max-height: 1000px; overflow-y: auto; }
+.cl-doc, .cl-doc * { font-family: var(--doc-font, Inter, sans-serif) !important; }
+.cl-doc p { margin: 0.12rem 0 !important; font-size: var(--doc-size, 0.9rem) !important; }
 .cl-doc ul { margin: 0.15rem 0 0.35rem 1.1rem !important; padding: 0 !important; }
-.cl-doc li { margin: 0.08rem 0 !important; font-size: 0.9rem !important; }
-.cl-name { text-align: center; font-size: 1.6rem; font-weight: 700; color: #1E3A8A; letter-spacing: -0.01em; }
-.cl-contact { text-align: center; color: #64748B; font-size: 0.8rem; margin-top: 0.15rem; }
-.cl-heading { margin: 1.1rem 0 0.45rem 0; padding-bottom: 0.2rem; border-bottom: 1.5px solid #1E3A8A;
-              color: #1E3A8A; font-weight: 700; font-size: 0.8rem; letter-spacing: 0.08em; }
+.cl-doc li { margin: 0.08rem 0 !important; font-size: var(--doc-size, 0.9rem) !important; }
+.cl-name { text-align: var(--doc-align, center); font-size: 1.6rem; font-weight: 700; color: var(--doc-accent, #1E3A8A); letter-spacing: -0.01em; }
+.cl-contact { text-align: var(--doc-align, center); color: #64748B; font-size: 0.8rem; margin-top: 0.15rem; }
+.cl-heading { margin: 1.1rem 0 0.45rem 0; color: var(--doc-accent, #1E3A8A); font-weight: 700; font-size: 0.8rem; letter-spacing: 0.08em; }
+.cl-heading-rule { padding-bottom: 0.2rem; border-bottom: 1.5px solid var(--doc-accent, #1E3A8A); }
+.cl-heading-bar { padding-left: 0.55rem; border-left: 3px solid var(--doc-accent, #1E3A8A); }
 .cl-entry { font-weight: 600; margin-top: 0.55rem; }
+[data-testid="stMetricValue"] { font-size: 1.9rem; }
 .cl-letter { padding: 2.6rem 3rem; }
 .cl-letter p { margin: 0 0 0.9rem 0 !important; }
 
@@ -99,21 +108,22 @@ st.markdown(f"""
 <div class="cl-hero">
   <div class="cl-eyebrow">AI career document platform</div>
   <div class="cl-h1">Tailor your resume to every job you apply for.</div>
-  <div class="cl-lead">{APP_NAME} reads your resume and the job description, scores your ATS match,
-  rewrites your resume for the role, and drafts a matching cover letter &mdash; in about 30 seconds.</div>
+  <div class="cl-lead">{APP_NAME} reads your resume and the job description, rewrites your resume for the role,
+  shows how much your ATS score improved, and adds a 15-second recruiter snapshot and a matching cover letter &mdash;
+  in under a minute.</div>
 </div>
 <div class="cl-features">
   <div class="cl-feature">
-    <div class="cl-feature-title">ATS match scoring</div>
-    <div class="cl-feature-text">Semantic and keyword matching show how well you fit the role and exactly what's missing.</div>
+    <div class="cl-feature-title">ATS score, before and after</div>
+    <div class="cl-feature-text">Semantic and keyword matching show how well you fit the role, what's missing, and how much tailoring helped.</div>
   </div>
   <div class="cl-feature">
-    <div class="cl-feature-title">Tailored resume &amp; cover letter</div>
-    <div class="cl-feature-text">A seven-step AI pipeline rewrites your resume for the role without dropping your experience.</div>
+    <div class="cl-feature-title">Resume, snapshot &amp; cover letter</div>
+    <div class="cl-feature-text">An {len(PIPELINE_STEPS)}-step AI pipeline tailors your resume without dropping experience, plus a half-page recruiter snapshot.</div>
   </div>
   <div class="cl-feature">
     <div class="cl-feature-title">Recruiter-ready exports</div>
-    <div class="cl-feature-text">Download cleanly formatted PDF and Word documents, ready to submit.</div>
+    <div class="cl-feature-text">Edit on the page, pick one of {len(TEMPLATES)} professional templates, and download PDF or Word.</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -307,6 +317,10 @@ if generate_clicked:
             except LLMUnavailableError:
                 status.update(label="Generation failed", state="error")
                 st.error("Our AI service is temporarily unavailable. Please try again in a minute.")
+            except ResumeGenerationError:
+                status.update(label="Generation failed", state="error")
+                st.error("We couldn't generate a complete resume this time. This occasionally happens with long "
+                         "resumes — please try again. This attempt didn't count toward your limit.")
             except Exception as exc:
                 log_event(f"{request_id}: unexpected error ({type(exc).__name__})")
                 status.update(label="Generation failed", state="error")
@@ -316,24 +330,125 @@ if generate_clicked:
             increment_counter()
             st.session_state.generation_count += 1
 
-            # Store the final resume in session state so Apply-fix buttons can edit it
-            # and have the edits persist across reruns.
-            st.session_state.editable_resume = result["workflow"]["human_optimizer"]["human_friendly_resume"]
-            st.session_state.cover_letter = result["workflow"]["cover_letter"]["cover_letter"]
+            workflow = result["workflow"]
+            # Documents live in session state so edits and Apply-fix buttons persist across reruns.
+            st.session_state.originals = {
+                "resume": workflow["human_optimizer"]["human_friendly_resume"],
+                "snapshot": workflow["recruiter_snapshot"]["snapshot"],
+                "cover_letter": workflow["cover_letter"]["cover_letter"],
+            }
+            st.session_state.docs = dict(st.session_state.originals)
+            st.session_state.doc_versions = {key: 0 for key in st.session_state.docs}
             st.session_state.last_result = result
             st.session_state.last_full_name = full_name
 
 # ------------------------------------------------------------------
+# Results helpers
+# ------------------------------------------------------------------
+def set_document(doc_key: str, text: str):
+    """Replace a document's text and refresh its editor (editor widgets are keyed by version)."""
+    st.session_state.docs[doc_key] = text
+    st.session_state.doc_versions[doc_key] += 1
+
+
+def save_edit(doc_key: str, widget_key: str):
+    st.session_state.docs[doc_key] = st.session_state[widget_key]
+
+
+def document_panel(doc_key: str, noun: str, file_label: str, template: str, stem: str, full_name: str):
+    """Preview/edit toggle on the left, downloads and reset on the right."""
+    text = st.session_state.docs[doc_key]
+    is_letter = doc_key == "cover_letter"
+    doc_col, action_col = st.columns([3, 1], gap="large")
+
+    with doc_col:
+        mode = st.segmented_control(
+            f"{noun} view", ["Preview", "Edit"], default="Preview", key=f"mode_{doc_key}", label_visibility="collapsed",
+        ) or "Preview"
+        if mode == "Edit":
+            widget_key = f"editor_{doc_key}_{st.session_state.doc_versions[doc_key]}"
+            st.text_area(
+                f"Edit your {noun}", value=text, height=640, key=widget_key,
+                on_change=save_edit, args=(doc_key, widget_key), label_visibility="collapsed",
+            )
+            st.caption("Edits save when you click outside the box. Keep section titles in CAPITALS and start "
+                       "bullets with “- ” so the PDF and Word files format correctly.")
+        elif is_letter:
+            st.markdown(letter_to_html(text, template), unsafe_allow_html=True)
+        else:
+            st.markdown(resume_to_html(text, template), unsafe_allow_html=True)
+
+    with action_col:
+        st.markdown('<div class="cl-card-title">Download</div>', unsafe_allow_html=True)
+        pdf = build_letter_pdf(text, full_name, template) if is_letter else build_resume_pdf(text, template)
+        docx_bytes = build_letter_docx(text, full_name, template) if is_letter else build_resume_docx(text, template)
+        st.download_button("PDF", data=pdf, file_name=f"{stem}_{file_label}.pdf", mime="application/pdf",
+                           type="primary", width="stretch", key=f"pdf_{doc_key}")
+        st.download_button("Word (DOCX)", data=docx_bytes, file_name=f"{stem}_{file_label}.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                           width="stretch", key=f"docx_{doc_key}")
+        st.download_button("Plain text", data=text, file_name=f"{stem}_{file_label}.txt", mime="text/plain",
+                           width="stretch", key=f"txt_{doc_key}")
+        st.divider()
+        if text != st.session_state.originals[doc_key]:
+            if st.button("Undo all edits", width="stretch", key=f"reset_{doc_key}"):
+                set_document(doc_key, st.session_state.originals[doc_key])
+                st.rerun()
+
+
+def ats_dumbbell_chart(before: dict, after: dict):
+    """Before -> after per measure: one hue, two shades, joined by a neutral rule (a dumbbell chart)."""
+    rows = [("Overall ATS score", before["ats_score"], after["ats_score"]),
+            ("Keyword match", before["keyword_score"], after["keyword_score"])]
+    if before.get("semantic_score") is not None and after.get("semantic_score") is not None:
+        rows.append(("Semantic match", before["semantic_score"], after["semantic_score"]))
+
+    wide = pd.DataFrame(rows, columns=["Measure", "Original", "Tailored"])
+    wide["Change"] = (wide["Tailored"] - wide["Original"]).map(lambda d: f"{d:+d}")
+    wide["Label"] = wide["Tailored"].astype(str) + " (" + wide["Change"] + ")"
+    long = wide.melt(id_vars=["Measure", "Change"], value_vars=["Original", "Tailored"],
+                     var_name="Version", value_name="Score")
+
+    order = list(wide["Measure"])
+    y = alt.Y("Measure:N", sort=order, title=None,
+              axis=alt.Axis(labelFontSize=13, labelColor="#334155", ticks=False, domain=False, labelPadding=12, labelLimit=220))
+    x_scale = alt.Scale(domain=[0, 100])
+    x_axis = alt.Axis(values=[0, 25, 50, 75, 100], gridColor="#EEF1F5", domain=False, ticks=False,
+                      labelColor="#64748B", titleColor="#64748B", titleFontWeight="normal")
+
+    rule = alt.Chart(wide).mark_rule(color="#CBD5E1", strokeWidth=2).encode(
+        y=y, x=alt.X("Original:Q", scale=x_scale, axis=x_axis, title="Score (0–100)"), x2="Tailored:Q",
+    )
+    points = alt.Chart(long).mark_circle(size=190, opacity=1, stroke="white", strokeWidth=2).encode(
+        y=y,
+        x=alt.X("Score:Q", scale=x_scale),
+        color=alt.Color("Version:N", scale=alt.Scale(domain=["Original", "Tailored"], range=["#94A8D8", "#1E3A8A"]),
+                        legend=alt.Legend(title=None, orient="top", direction="horizontal", labelFontSize=12,
+                                          labelColor="#334155", symbolSize=140, symbolStrokeWidth=0)),
+        tooltip=[alt.Tooltip("Measure:N"), alt.Tooltip("Version:N", title="Resume"),
+                 alt.Tooltip("Score:Q"), alt.Tooltip("Change:N", title="Change after tailoring")],
+    )
+    # Selective direct label: only the tailored endpoint, with the change.
+    labels = alt.Chart(wide).mark_text(dy=-17, fontSize=12, fontWeight=600, color="#0F172A").encode(
+        y=y, x=alt.X("Tailored:Q", scale=x_scale), text="Label:N",
+    )
+    chart = (rule + points + labels).properties(height=78 * len(rows) + 40)
+    return chart.configure_view(strokeWidth=0), wide[["Measure", "Original", "Tailored", "Change"]]
+
+# ------------------------------------------------------------------
 # Results (persist across reruns via session_state, so Apply buttons work)
 # ------------------------------------------------------------------
-if "last_result" in st.session_state:
+if "last_result" in st.session_state and "docs" in st.session_state:
     result = st.session_state.last_result
     workflow = result["workflow"]
     full_name = st.session_state.last_full_name
-    cover_letter = st.session_state.cover_letter
     stem = file_stem(full_name)
 
     ats_data = workflow["ats_optimization"]
+    before = ats_data.get("before", {"ats_score": ats_data.get("ats_score", 0),
+                                     "keyword_score": ats_data.get("keyword_score", 0),
+                                     "semantic_score": ats_data.get("semantic_score")})
+    after = ats_data.get("after", before)
     completeness = workflow.get("completeness_check", {})
     suggestions = workflow["reviewer"].get("suggestions", [])
     analyzer = workflow.get("analyzer", {}) if isinstance(workflow.get("analyzer"), dict) else {}
@@ -343,14 +458,24 @@ if "last_result" in st.session_state:
                 f'<div class="cl-section-sub">Generated in {result["execution_time"]} seconds.</div>',
                 unsafe_allow_html=True)
 
+    change = after["ats_score"] - before["ats_score"]
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("ATS match", f"{ats_data.get('ats_score', 0)}/100", border=True)
+    m1.metric("ATS match", f"{after['ats_score']}/100", delta=f"{change:+d} vs. original",
+              delta_color="normal" if change else "off", border=True)
     m2.metric("Experience preserved", f"{completeness.get('completeness_pct', 100)}%", border=True)
     m3.metric("Review suggestions", len(suggestions), border=True)
     m4.metric("Candidate level", analyzer.get("candidate_level") or "—", border=True)
 
-    tab_resume, tab_letter, tab_ats, tab_review, tab_draft = st.tabs(
-        ["Tailored resume", "Cover letter", "ATS analysis", "Review suggestions", "First draft"]
+    style_col, style_note_col = st.columns([2, 3], vertical_alignment="center")
+    with style_col:
+        template = st.segmented_control(
+            "Document style", list(TEMPLATES), default=DEFAULT_TEMPLATE, key="template",
+        ) or DEFAULT_TEMPLATE
+    with style_note_col:
+        st.caption(TEMPLATES[template]["description"] + " Applies to the preview and every download.")
+
+    tab_resume, tab_snapshot, tab_letter, tab_ats, tab_review, tab_draft = st.tabs(
+        ["Tailored resume", "Recruiter snapshot", "Cover letter", "ATS analysis", "Review suggestions", "First draft"]
     )
 
     with tab_resume:
@@ -361,73 +486,37 @@ if "last_result" in st.session_state:
             )
             for line in completeness["possibly_missing"]:
                 st.caption(f"• {line}")
+        document_panel("resume", "resume", "Resume", template, stem, full_name)
 
-        doc_col, action_col = st.columns([3, 1], gap="large")
-        with doc_col:
-            st.markdown(resume_to_html(st.session_state.editable_resume), unsafe_allow_html=True)
-        with action_col:
-            st.markdown('<div class="cl-card-title">Download</div>', unsafe_allow_html=True)
-            st.download_button(
-                "PDF", data=build_resume_pdf(st.session_state.editable_resume),
-                file_name=f"{stem}_Resume.pdf", mime="application/pdf", type="primary", width="stretch",
-            )
-            st.download_button(
-                "Word (DOCX)", data=build_resume_docx(st.session_state.editable_resume),
-                file_name=f"{stem}_Resume.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", width="stretch",
-            )
-            st.download_button(
-                "Plain text", data=st.session_state.editable_resume,
-                file_name=f"{stem}_Resume.txt", mime="text/plain", width="stretch",
-            )
-            st.divider()
-            st.caption("Apply fixes from the Review suggestions tab to update this resume.")
-            if st.button("Reset edits", width="stretch"):
-                st.session_state.editable_resume = workflow["human_optimizer"]["human_friendly_resume"]
-                st.rerun()
+    with tab_snapshot:
+        st.caption("A half-page version a recruiter can scan in 10–15 seconds. Send it alongside your full "
+                   "resume, or paste it into a message to a recruiter.")
+        document_panel("snapshot", "recruiter snapshot", "Recruiter_Snapshot", template, stem, full_name)
 
     with tab_letter:
-        doc_col, action_col = st.columns([3, 1], gap="large")
-        with doc_col:
-            st.markdown(letter_to_html(cover_letter), unsafe_allow_html=True)
-        with action_col:
-            st.markdown('<div class="cl-card-title">Download</div>', unsafe_allow_html=True)
-            st.download_button(
-                "PDF", data=build_letter_pdf(cover_letter, full_name),
-                file_name=f"{stem}_Cover_Letter.pdf", mime="application/pdf", type="primary", width="stretch",
-            )
-            st.download_button(
-                "Word (DOCX)", data=build_letter_docx(cover_letter, full_name),
-                file_name=f"{stem}_Cover_Letter.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", width="stretch",
-            )
-            st.download_button(
-                "Plain text", data=cover_letter,
-                file_name=f"{stem}_Cover_Letter.txt", mime="text/plain", width="stretch",
-            )
+        document_panel("cover_letter", "cover letter", "Cover_Letter", template, stem, full_name)
 
     with tab_ats:
-        score = ats_data.get("ats_score", 0)
-        score_col, detail_col = st.columns([1, 2], gap="large")
-        with score_col:
-            with st.container(border=True):
-                st.metric("ATS match score", f"{score}/100")
-                st.progress(score / 100)
-                if ats_data.get("semantic_score") is not None:
-                    st.caption(f"Keyword match {ats_data.get('keyword_score')} · Semantic match {ats_data['semantic_score']}")
-                else:
-                    st.caption("Keyword match only. Add a job description for semantic matching.")
-        with detail_col:
-            explanation = ats_data.get("explanation", "")
-            missing_keywords = ats_data.get("missing_keywords", [])
-            if explanation:
-                st.markdown(f"**Why this score**\n\n{explanation}")
-            if missing_keywords:
-                chips = "".join(f'<span class="cl-chip">{html.escape(str(kw))}</span>' for kw in missing_keywords)
-                st.markdown("**Missing or under-represented skills**")
-                st.markdown(f'<div class="cl-chips">{chips}</div>', unsafe_allow_html=True)
-            with st.expander("Raw agent output"):
-                st.code(ats_data.get("llm_feedback", ""), language=None)
+        chart, table = ats_dumbbell_chart(before, after)
+        st.markdown(f"**ATS score: original vs. tailored resume** &nbsp;·&nbsp; {change:+d} points overall")
+        st.altair_chart(chart, width="stretch")
+        st.caption("Both versions are scored the same way. Keyword match uses the skills you entered; "
+                   "semantic match compares your resume to the job description.")
+        with st.expander("View as table"):
+            st.dataframe(table, hide_index=True, width="stretch")
+
+        st.write("")
+        explanation = ats_data.get("explanation", "")
+        missing_keywords = ats_data.get("missing_keywords", [])
+        if explanation:
+            st.markdown(f"**What held your original score back**\n\n{explanation}")
+        if missing_keywords:
+            chips = "".join(f'<span class="cl-chip">{html.escape(str(kw))}</span>' for kw in missing_keywords)
+            st.markdown("**Missing or under-represented skills**")
+            st.markdown(f'<div class="cl-chips">{chips}</div>', unsafe_allow_html=True)
+            st.caption("Only add these to your resume if you genuinely have the experience.")
+        with st.expander("Raw agent output"):
+            st.code(ats_data.get("llm_feedback", ""), language=None)
 
     with tab_review:
         if not suggestions:
@@ -438,6 +527,7 @@ if "last_result" in st.session_state:
                 issue = sug.get("issue", "Suggestion")
                 current_text = sug.get("current_text", "")
                 suggested_fix = sug.get("suggested_fix", "")
+                resume_now = st.session_state.docs["resume"]
 
                 with st.container(border=True):
                     st.markdown(f"**{issue}**")
@@ -450,27 +540,24 @@ if "last_result" in st.session_state:
                         st.code(suggested_fix, language=None, wrap_lines=True)
                     with col_c:
                         st.write("")
-                        already_applied = current_text and current_text not in st.session_state.editable_resume
-                        if already_applied:
+                        if current_text and current_text not in resume_now:
                             st.success("Applied")
                         elif st.button("Apply", key=f"apply_{i}", width="stretch"):
-                            if current_text and current_text in st.session_state.editable_resume:
-                                st.session_state.editable_resume = st.session_state.editable_resume.replace(
-                                    current_text, suggested_fix, 1
-                                )
+                            if current_text and current_text in resume_now:
+                                set_document("resume", resume_now.replace(current_text, suggested_fix, 1))
                                 st.rerun()
                             else:
                                 st.warning("Couldn't find an exact match to apply automatically. Edit it manually.")
 
     with tab_draft:
         st.caption("The Resume Writer's first draft, before the Human Optimizer polished it.")
-        st.markdown(resume_to_html(workflow["resume_writer"]["generated_resume"]), unsafe_allow_html=True)
+        st.markdown(resume_to_html(workflow["resume_writer"]["generated_resume"], template), unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 # How it works + footer
 # ------------------------------------------------------------------
 st.write("")
-with st.expander(f"How {APP_NAME} works — a {len(PIPELINE_STEPS)}-step AI pipeline"):
+with st.expander(f"How {APP_NAME} works — an {len(PIPELINE_STEPS)}-step AI pipeline"):
     st.markdown("\n".join(
         f"{i}. **{name}** — {description}" for i, (name, description) in enumerate(PIPELINE_STEPS, start=1)
     ))

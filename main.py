@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, model_validator
 from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
@@ -41,7 +42,8 @@ client = OpenAI(api_key=api_key_value) if api_key_value else None
 # LLM provider selection — defaults to Groq (free) if configured, falls back to OpenAI
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 groq_api_key = os.getenv("GROQ_API_KEY")
-groq_client = Groq(api_key=groq_api_key) if (Groq and groq_api_key) else None
+# Several agents run in parallel, so allow extra retries — the SDK backs off automatically on rate limits (429).
+groq_client = Groq(api_key=groq_api_key, max_retries=4) if (Groq and groq_api_key) else None
 
 #----------------------
 # RAG CONFIG
@@ -153,13 +155,22 @@ def call_llm(prompt):
     # Groq path (free) — used when LLM_PROVIDER=groq and a key is configured
     if LLM_PROVIDER == "groq" and groq_client is not None:
         try:
+            # gpt-oss is a reasoning model: hidden reasoning tokens count against max_tokens. Low effort
+            # leaves room for the actual resume; max_tokens stays small enough for Groq's free-tier TPM limit.
             response = groq_client.chat.completions.create(
                 model="openai/gpt-oss-20b",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4096,
                 temperature=0.4,
+                reasoning_effort="low",
             )
-            return response.choices[0].message.content
+            choice = response.choices[0]
+            content = (choice.message.content or "").strip()
+            if choice.finish_reason == "length":
+                log_event("Groq output hit the token limit and may be truncated")
+            if content:
+                return content
+            log_event("Groq returned an empty response, falling back to OpenAI")
         except Exception as exc:
             log_event(f"Groq call failed ({type(exc).__name__}), falling back to OpenAI")
 
@@ -178,10 +189,13 @@ def call_llm(prompt):
             max_tokens=4096,
             temperature=0.4,
         )
-        return response.choices[0].message.content
+        content = (response.choices[0].message.content or "").strip()
     except Exception as exc:
         log_event(f"OpenAI call failed ({type(exc).__name__})")
         raise LLMUnavailableError("All LLM providers failed.") from exc
+    if not content:
+        raise LLMUnavailableError("The LLM returned an empty response.")
+    return content
 
 #--------------------------------
 # JSON PARSING HELPERS
@@ -249,8 +263,9 @@ def check_completeness(original_text: str, final_text: str) -> dict:
 
     missing = []
     for marker in original_markers:
+        # All of an entry's years must survive — "any" let a dropped 2019-2020 job hide behind a 2019 degree.
         years_in_marker = re.findall(r"(?:19|20)\d{2}", marker)
-        found = any(year in final_text for year in years_in_marker)
+        found = all(year in final_text for year in years_in_marker)
         if not found:
             missing.append(marker)
 
@@ -340,24 +355,24 @@ def retrieve_relevant_chunks(request_id: str, job_description: str, top_k: int =
     return matched_chunks
 
 
-def semantic_ats_score(job_description: str, matched_chunks: list[str]) -> int:
+def semantic_ats_score(job_description: str, chunks: list[str], top_k: int = 5) -> int:
     """
-    Similarity-based ATS score (0-100) using cosine similarity between the JD embedding
-    and each matched chunk. Raw cosine similarity between a job description (long, formal)
-    and a resume bullet (short, specific) rarely exceeds ~0.6 even for a strong match, so
-    the raw value is rescaled here to map onto a more intuitive 0-100 "match quality" range.
+    Similarity-based ATS score (0-100): the average cosine similarity between the JD embedding
+    and the top_k most similar resume chunks. Raw cosine similarity between a job description
+    (long, formal) and a resume bullet (short, specific) rarely exceeds ~0.6 even for a strong
+    match, so the raw value is rescaled onto a more intuitive 0-100 "match quality" range.
     """
-    if not job_description or not matched_chunks or embedding_model is None:
+    if not job_description or not chunks or embedding_model is None:
         return None
 
     jd_vector = embedding_model.encode(job_description)
-    chunk_vectors = embedding_model.encode(matched_chunks)
+    chunk_vectors = embedding_model.encode(chunks)
 
     import numpy as np
-    similarities = [
-        float(np.dot(jd_vector, cv) / (np.linalg.norm(jd_vector) * np.linalg.norm(cv)))
-        for cv in chunk_vectors
-    ]
+    similarities = sorted(
+        (float(np.dot(jd_vector, cv) / (np.linalg.norm(jd_vector) * np.linalg.norm(cv))) for cv in chunk_vectors),
+        reverse=True,
+    )[:top_k]
     avg_similarity = sum(similarities) / len(similarities)
 
     # Rescale: treat ~0.15 raw similarity as "0% match" and ~0.65 as "100% match" —
@@ -422,22 +437,28 @@ def calculate_ats_score(resume_text: str, skills: list[str]) -> int:
 
     return max(0, min(score, 100))
 
+
+def ats_breakdown(resume_text: str, job_description: str | None, skills: list[str]) -> dict:
+    """
+    Score any resume text the same way, so the original and tailored versions are comparable.
+    Blends keyword matching (literal, generous) with semantic similarity (conservative by nature —
+    using it alone makes even great resumes look artificially low).
+    """
+    keyword_score = calculate_ats_score(resume_text, skills)
+    semantic_score = semantic_ats_score(job_description, chunk_resume(resume_text))
+    overall = round((keyword_score + semantic_score) / 2) if semantic_score is not None else keyword_score
+    return {"overall": overall, "keyword": keyword_score, "semantic": semantic_score}
+
 #------------------------
 # ATS OPTIMIZATION AGENT (RAG-aware)
 #------------------------
 
-def ats_agent(user_request, matched_chunks=None, semantic_score=None):
+def ats_agent(user_request, matched_chunks=None):
 
     log_event("ATS Agent Started")
 
-    # Blend keyword matching (literal, generous) with semantic similarity (conservative by nature —
-    # raw cosine similarity between differently-styled texts rarely exceeds ~0.5-0.6 even for strong
-    # matches, so using it alone makes even great resumes look artificially low).
-    keyword_score = calculate_ats_score(user_request.get("resume_text", ""), user_request["skills"])
-    if semantic_score is not None:
-        final_score = round((keyword_score + semantic_score) / 2)
-    else:
-        final_score = keyword_score
+    scores = ats_breakdown(user_request.get("resume_text") or "", user_request.get("job_description"), user_request["skills"])
+    keyword_score, semantic_score, final_score = scores["keyword"], scores["semantic"], scores["overall"]
 
     relevant_context = "\n".join(matched_chunks) if matched_chunks else user_request.get("resume_text", "")
     job_description = user_request.get("job_description")
@@ -501,6 +522,31 @@ RESUME_FORMAT_RULES = """
     """
 
 #----------------------
+# GUARDRAIL: USABLE OUTPUT CHECK
+#----------------------
+
+class ResumeGenerationError(RuntimeError):
+    """Raised when the LLM keeps returning something that isn't a resume (empty, truncated, or a question)."""
+
+
+_NON_RESUME_PHRASES = (
+    "please paste", "please provide", "please share", "i need the", "i'm ready to", "i am ready to",
+    "could you provide", "could you share", "i can't", "i cannot", "as an ai",
+)
+
+
+def is_usable_resume(text: str, source_text: str | None) -> bool:
+    """Reject empty, suspiciously short, or conversational LLM replies before they reach the user."""
+    if not text or len(text.strip()) < 200:
+        return False
+    opening = text.strip()[:250].lower()
+    if any(phrase in opening for phrase in _NON_RESUME_PHRASES):
+        return False
+    if source_text and len(text) < 0.3 * len(source_text):
+        return False
+    return True
+
+#----------------------
 # RESUME WRITER AGENT (uses RAG-matched content when available)
 #----------------------
 
@@ -544,6 +590,11 @@ def resume_writer_agent(user_request, matched_chunks=None):
     """
 
     resume = call_llm(prompt)
+    if not is_usable_resume(resume, full_resume_text):
+        log_event("Resume Writer output unusable — retrying once")
+        resume = call_llm(prompt)
+        if not is_usable_resume(resume, full_resume_text):
+            raise ResumeGenerationError("The resume writer did not return a complete resume.")
 
     output = {
         "generated_resume": resume
@@ -681,7 +732,50 @@ def cover_letter_agent(user_request, matched_chunks=None):
     return output
 
 #----------------------
-# ORCHESTRATOR (RAG step, 7-step pipeline, progress callback)
+# RECRUITER SNAPSHOT AGENT (a 10-15 second, half-page version of the resume)
+#----------------------
+
+def recruiter_snapshot_agent(user_request, final_resume_text):
+
+    log_event("Recruiter Snapshot Agent Started")
+
+    job_description = user_request.get("job_description") or ""
+    target = (
+        f"the job description below:\n{job_description}"
+        if job_description
+        else f"a {user_request['current_role'] or 'role matching their background'} role"
+    )
+
+    prompt = f"""
+    Create a RECRUITER SNAPSHOT: a one-glance summary a recruiter can read in 10-15 seconds to
+    decide whether this candidate fits {target}
+
+    Source resume (the ONLY source of facts — never invent employers, titles, dates, metrics, or skills):
+    {final_resume_text}
+
+    Output plain text only (no Markdown: no **, no #, no backticks), in exactly this layout:
+    Line 1: the candidate's full name
+    Line 2: contact details separated by " | " (omit if none)
+    ROLE FIT
+    Two short sentences: who the candidate is (level, years, domain) and why they fit this role.
+    KEY MATCHES
+    - 3 to 4 bullets. Each pairs something the role needs with concrete evidence from the resume, ideally a number.
+    CORE SKILLS
+    2 to 3 lines, each "Category: skill, skill, skill" — only skills relevant to the role.
+    RECENT EXPERIENCE
+    The 2-3 most recent roles, one line each: "Title | Company | Dates". No bullets.
+    EDUCATION
+    One line per degree: "Degree | School | Year" (omit the section if none).
+
+    Hard limit: 170 words in total. Every word must help the recruiter decide in seconds.
+    """
+
+    snapshot = call_llm(prompt)
+    log_event("Recruiter snapshot generated")
+    return {"snapshot": snapshot}
+
+#----------------------
+# ORCHESTRATOR (RAG step, parallel agents, progress callback)
 #----------------------
 
 PIPELINE_STEPS = [
@@ -689,8 +783,9 @@ PIPELINE_STEPS = [
     ("ATS Match", "Scores your resume against the job using semantic (RAG) and keyword matching."),
     ("Resume Writer", "Drafts a tailored resume using your full resume as the only source of truth."),
     ("Human Optimizer", "Polishes the draft so it reads naturally, not like AI-generated text."),
-    ("Completeness Check", "A guardrail that flags any job or project that may have been dropped."),
+    ("Completeness Check", "A guardrail that flags dropped jobs and rejects broken AI output."),
     ("Reviewer", "Checks grammar, formatting, and consistency, with one-click fixes."),
+    ("Recruiter Snapshot", "Condenses your resume into a half-page summary a recruiter can read in 15 seconds."),
     ("Cover Letter Writer", "Drafts a matching cover letter tailored to the same role."),
 ]
 
@@ -700,53 +795,71 @@ def orchestrator(user_request, request_id, progress_callback=None):
     start = time.time()
 
     def notify(message):
+        # Only ever called from this (the caller's) thread — Streamlit UI updates are not thread-safe.
         log_event(f"{request_id}: {message}")
         if progress_callback:
             progress_callback(message)
 
     # RAG step — chunk + store resume, then retrieve JD-relevant chunks
     matched_chunks = []
-    semantic_score = None
     resume_text = user_request.get("resume_text")
     job_description = user_request.get("job_description")
 
     try:
         notify("Reading your resume...")
         if resume_text:
-            chunks = chunk_resume(resume_text)
-            store_resume_chunks(request_id, chunks)
-
+            store_resume_chunks(request_id, chunk_resume(resume_text))
             if job_description:
                 notify("Matching your resume to the job description...")
                 matched_chunks = retrieve_relevant_chunks(request_id, job_description)
-                semantic_score = semantic_ats_score(job_description, matched_chunks)
     finally:
         # Resume chunks are only needed for retrieval — never keep them beyond this request.
         delete_resume_chunks(request_id)
 
-    notify("Analyzing your profile...")
-    analyzer_output = analyzer_agent(user_request, request_id)
+    # Agents that only need the original resume run in the background while the
+    # writer -> optimizer chain (which must run in order) runs here.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        notify("Analyzing your profile, ATS match, and cover letter...")
+        analyzer_future = pool.submit(analyzer_agent, user_request, request_id)
+        ats_future = pool.submit(ats_agent, user_request, matched_chunks)
+        cover_letter_future = pool.submit(cover_letter_agent, user_request, matched_chunks)
 
-    notify("Scoring your ATS match...")
-    ats_output = ats_agent(user_request, matched_chunks=matched_chunks, semantic_score=semantic_score)
+        notify("Writing your tailored resume...")
+        resume_writer_output = resume_writer_agent(user_request, matched_chunks=matched_chunks)
+        draft_text = resume_writer_output["generated_resume"]
 
-    notify("Writing your tailored resume...")
-    resume_writer_output = resume_writer_agent(user_request, matched_chunks=matched_chunks)
+        notify("Polishing the final version...")
+        human_optimizer_output = human_optimizer_agent(user_request, draft_text)
+        polished_text = human_optimizer_output["human_friendly_resume"]
 
-    notify("Polishing the final version...")
-    human_optimizer_output = human_optimizer_agent(user_request, resume_writer_output["generated_resume"])
+        notify("Checking that nothing was dropped...")
+        # Guardrail: never let the polish step lose content the draft had — fall back to the draft instead.
+        draft_completeness = check_completeness(resume_text, draft_text)
+        polished_completeness = check_completeness(resume_text, polished_text)
+        if (not is_usable_resume(polished_text, resume_text)
+                or polished_completeness["completeness_pct"] < draft_completeness["completeness_pct"]):
+            log_event(f"{request_id}: Human Optimizer output rejected — using the Resume Writer draft")
+            human_optimizer_output = {"human_friendly_resume": draft_text, "fell_back_to_draft": True}
+            polished_completeness = draft_completeness
+        final_resume_text = human_optimizer_output["human_friendly_resume"]
+        completeness_output = polished_completeness
+        if completeness_output["possibly_missing"]:
+            log_event(f"{request_id}: WARNING — {len(completeness_output['possibly_missing'])} entries possibly dropped")
 
-    notify("Checking that nothing was dropped...")
-    final_resume_text = human_optimizer_output["human_friendly_resume"]
-    completeness_output = check_completeness(resume_text, final_resume_text)
-    if completeness_output["possibly_missing"]:
-        log_event(f"{request_id}: WARNING — {len(completeness_output['possibly_missing'])} entries possibly dropped")
+        notify("Reviewing and building your recruiter snapshot...")
+        reviewer_future = pool.submit(reviewer_agent, final_resume_text)
+        snapshot_future = pool.submit(recruiter_snapshot_agent, user_request, final_resume_text)
 
-    notify("Reviewing grammar and consistency...")
-    reviewer_output = reviewer_agent(final_resume_text)
+        ats_output = ats_future.result()
+        ats_output["before"] = {k: ats_output[k] for k in ("ats_score", "keyword_score", "semantic_score")}
+        after = ats_breakdown(final_resume_text, job_description, user_request["skills"])
+        ats_output["after"] = {"ats_score": after["overall"], "keyword_score": after["keyword"], "semantic_score": after["semantic"]}
 
-    notify("Drafting your cover letter...")
-    cover_letter_output = cover_letter_agent(user_request, matched_chunks=matched_chunks)
+        notify("Finishing up...")
+        analyzer_output = analyzer_future.result()
+        cover_letter_output = cover_letter_future.result()
+        reviewer_output = reviewer_future.result()
+        snapshot_output = snapshot_future.result()
 
     execution_time = round(time.time() - start, 2)
     log_event(f"{request_id}: Orchestrator finished in {execution_time}s")
@@ -762,6 +875,7 @@ def orchestrator(user_request, request_id, progress_callback=None):
             "resume_writer": resume_writer_output,
             "human_optimizer": human_optimizer_output,
             "reviewer": reviewer_output,
+            "recruiter_snapshot": snapshot_output,
             "cover_letter": cover_letter_output,
             "completeness_check": completeness_output,
         },
@@ -789,6 +903,8 @@ def generate_resume(request: ResumeRequest):
         return orchestrator(request.model_dump(), request_id)
     except LLMUnavailableError:
         raise HTTPException(status_code=503, detail="The AI service is temporarily unavailable. Please try again shortly.")
+    except ResumeGenerationError:
+        raise HTTPException(status_code=502, detail="The AI could not produce a complete resume. Please try again.")
 
 
 if __name__ == "__main__":
