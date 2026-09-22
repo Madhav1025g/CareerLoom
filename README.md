@@ -10,7 +10,8 @@ CareerLoom reads your resume and a job description, then generates a tailored re
 
 - Upload your resume (PDF, DOCX, or TXT) or paste it directly
 - Paste a job description for semantically matched, tailored output
-- **ATS score before vs. after** tailoring, shown as a chart, with missing skills and a plain-English explanation
+- **Truly job-tailored rewrite**: the writer targets the job description's requirements and wording, using only experience you actually have
+- **ATS score before vs. after** tailoring (bar chart beside your resume, detailed chart in the ATS tab), with missing skills and a plain-English explanation
 - Rewritten, ATS-friendly resume plus a matching cover letter
 - **Recruiter snapshot**: a half-page version a recruiter can scan in 10–15 seconds
 - Reviewer suggestions with one-click **Apply**, plus **in-page editing** of every document

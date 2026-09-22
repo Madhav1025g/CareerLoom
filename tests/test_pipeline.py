@@ -172,3 +172,64 @@ def test_api_success(pipeline):
     response = TestClient(main.app).post("/generate_resume", json={**REQUEST, "api_key": "test-key-123"})
     assert response.status_code == 200
     assert "recruiter_snapshot" in response.json()["workflow"]
+
+# ---------------------------------------------------------------- job-description tailoring
+
+def test_writer_and_optimizer_receive_job_description_and_gaps(pipeline, monkeypatch):
+    prompts = {}
+
+    def llm(prompt):
+        if "Generate a professional ATS-friendly resume" in prompt:
+            prompts["writer"] = prompt
+        elif "Human sounding" in prompt:
+            prompts["optimizer"] = prompt
+        return fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    pipeline.orchestrator(dict(REQUEST), "req-jd")
+    assert REQUEST["job_description"] in prompts["writer"]
+    assert "Kubernetes" in prompts["writer"]            # the gap found by the ATS agent
+    assert "NEVER add a skill" in prompts["writer"]      # no-fabrication rule
+    assert REQUEST["job_description"] in prompts["optimizer"]
+
+
+def test_ats_gap_analysis_runs_before_writer(pipeline, monkeypatch):
+    order = []
+
+    def llm(prompt):
+        if "missing_keywords" in prompt:
+            order.append("ats")
+        elif "Generate a professional ATS-friendly resume" in prompt:
+            order.append("writer")
+        return fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    pipeline.orchestrator(dict(REQUEST), "req-order")
+    assert order.index("ats") < order.index("writer")
+
+
+def test_job_description_is_truncated_in_prompts():
+    long_jd = "Python " * 5000
+    section = main.tailoring_section({**REQUEST, "job_description": long_jd})
+    assert len(section) < main.JD_PROMPT_CHARS + 2000
+
+
+def test_no_job_description_targets_current_role():
+    section = main.tailoring_section({**REQUEST, "job_description": None})
+    assert "Software Engineer" in section and "TARGET JOB DESCRIPTION" not in section
+
+
+def test_lower_scoring_polish_falls_back_to_draft(pipeline, monkeypatch):
+    # The polished text drops the job keywords (same entries, so completeness is unchanged).
+    weaker = (TAILORED_RESUME.replace("FastAPI", "a web framework").replace("Docker", "containers")
+              .replace("AWS", "the cloud").replace("Python", "a language"))
+
+    def llm(prompt):
+        return weaker if "Human sounding" in prompt else fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    wf = pipeline.orchestrator(dict(REQUEST), "req-score")["workflow"]
+    assert wf["human_optimizer"]["fallback_reason"] == "lower ATS score"
+    assert wf["human_optimizer"]["human_friendly_resume"] == TAILORED_RESUME
+    ats = wf["ats_optimization"]
+    assert ats["after"]["ats_score"] == main.ats_breakdown(TAILORED_RESUME, REQUEST["job_description"], REQUEST["skills"])["overall"]

@@ -355,8 +355,9 @@ def save_edit(doc_key: str, widget_key: str):
     st.session_state.docs[doc_key] = st.session_state[widget_key]
 
 
-def document_panel(doc_key: str, noun: str, file_label: str, template: str, stem: str, full_name: str):
-    """Preview/edit toggle on the left, downloads and reset on the right."""
+def document_panel(doc_key: str, noun: str, file_label: str, template: str, stem: str, full_name: str,
+                   below_downloads=None):
+    """Preview/edit toggle on the left; downloads, reset, and optional extras (below_downloads) on the right."""
     text = st.session_state.docs[doc_key]
     is_letter = doc_key == "cover_letter"
     doc_col, action_col = st.columns([3, 1], gap="large")
@@ -394,14 +395,67 @@ def document_panel(doc_key: str, noun: str, file_label: str, template: str, stem
             if st.button("Undo all edits", width="stretch", key=f"reset_{doc_key}"):
                 set_document(doc_key, st.session_state.originals[doc_key])
                 st.rerun()
+        if below_downloads:
+            below_downloads()
+
+
+# Score changes this small are within the scorer's normal variation — don't present them as a gain or loss.
+SCORE_NOISE = 2
+
+
+def change_label(change: int) -> str:
+    return "About the same as original" if abs(change) <= SCORE_NOISE else f"{change:+d} vs. original"
+
+
+def score_rows(before: dict, after: dict, short: bool = False) -> list[tuple[str, int, int]]:
+    names = ("Overall", "Keyword", "Semantic") if short else ("Overall ATS score", "Keyword match", "Semantic match")
+    rows = [(names[0], before["ats_score"], after["ats_score"]),
+            (names[1], before["keyword_score"], after["keyword_score"])]
+    if before.get("semantic_score") is not None and after.get("semantic_score") is not None:
+        rows.append((names[2], before["semantic_score"], after["semantic_score"]))
+    return rows
+
+
+def ats_bar_chart(before: dict, after: dict):
+    """Compact grouped bars (original vs. tailored) sized for the narrow download column."""
+    rows = score_rows(before, after, short=True)
+    long = pd.DataFrame(
+        [(m, version, score, f"{a - b:+d}") for m, b, a in rows for version, score in (("Original", b), ("Tailored", a))],
+        columns=["Measure", "Version", "Score", "Change"],
+    )
+    order = [m for m, _, _ in rows]
+    encoding = dict(
+        y=alt.Y("Measure:N", sort=order, title=None, scale=alt.Scale(paddingInner=0.3),
+                axis=alt.Axis(ticks=False, domain=False, labelColor="#334155", labelFontSize=12, labelPadding=6)),
+        yOffset=alt.YOffset("Version:N", sort=["Original", "Tailored"], scale=alt.Scale(paddingInner=0.12)),
+        # Extra room past 100 keeps the value labels at the bar tips inside the chart.
+        x=alt.X("Score:Q", title=None, scale=alt.Scale(domain=[0, 118]),
+                axis=alt.Axis(values=[0, 50, 100], gridColor="#EEF1F5", domain=False, ticks=False, labelColor="#64748B")),
+    )
+    bars = alt.Chart(long).mark_bar(cornerRadiusEnd=4).encode(
+        **encoding,
+        color=alt.Color("Version:N", scale=alt.Scale(domain=["Original", "Tailored"], range=["#94A8D8", "#1E3A8A"]),
+                        legend=alt.Legend(title=None, orient="top", direction="horizontal", labelFontSize=11,
+                                          labelColor="#334155", symbolType="square", symbolSize=90)),
+        tooltip=[alt.Tooltip("Measure:N"), alt.Tooltip("Version:N", title="Resume"), alt.Tooltip("Score:Q"),
+                 alt.Tooltip("Change:N", title="Change after tailoring")],
+    )
+    labels = alt.Chart(long).mark_text(align="left", dx=4, fontSize=11, color="#334155").encode(
+        **encoding, text="Score:Q",
+    )
+    # Size by step (each bar 16px) so bars stay readable whatever the column width; "fit" + padding keeps
+    # the measure names from being clipped on narrow screens.
+    return (
+        (bars + labels)
+        .properties(height=alt.Step(16), padding={"left": 8, "right": 4, "top": 4, "bottom": 4},
+                    autosize=alt.AutoSizeParams(type="fit-x", contains="padding"))
+        .configure_view(strokeWidth=0)
+    )
 
 
 def ats_dumbbell_chart(before: dict, after: dict):
     """Before -> after per measure: one hue, two shades, joined by a neutral rule (a dumbbell chart)."""
-    rows = [("Overall ATS score", before["ats_score"], after["ats_score"]),
-            ("Keyword match", before["keyword_score"], after["keyword_score"])]
-    if before.get("semantic_score") is not None and after.get("semantic_score") is not None:
-        rows.append(("Semantic match", before["semantic_score"], after["semantic_score"]))
+    rows = score_rows(before, after)
 
     wide = pd.DataFrame(rows, columns=["Measure", "Original", "Tailored"])
     wide["Change"] = (wide["Tailored"] - wide["Original"]).map(lambda d: f"{d:+d}")
@@ -460,8 +514,9 @@ if "last_result" in st.session_state and "docs" in st.session_state:
 
     change = after["ats_score"] - before["ats_score"]
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("ATS match", f"{after['ats_score']}/100", delta=f"{change:+d} vs. original",
-              delta_color="normal" if change else "off", border=True)
+    meaningful = abs(change) > SCORE_NOISE
+    m1.metric("ATS match", f"{after['ats_score']}/100", delta=change_label(change),
+              delta_color="normal" if meaningful else "off", delta_arrow="auto" if meaningful else "off", border=True)
     m2.metric("Experience preserved", f"{completeness.get('completeness_pct', 100)}%", border=True)
     m3.metric("Review suggestions", len(suggestions), border=True)
     m4.metric("Candidate level", analyzer.get("candidate_level") or "—", border=True)
@@ -486,7 +541,14 @@ if "last_result" in st.session_state and "docs" in st.session_state:
             )
             for line in completeness["possibly_missing"]:
                 st.caption(f"• {line}")
-        document_panel("resume", "resume", "Resume", template, stem, full_name)
+        def resume_score_chart():
+            st.markdown('<div class="cl-card-title">ATS score</div>', unsafe_allow_html=True)
+            st.caption(f"Original vs. tailored · {change_label(change).lower()}")
+            st.altair_chart(ats_bar_chart(before, after), width="stretch")
+            if workflow["human_optimizer"].get("fallback_reason") == "lower ATS score":
+                st.caption("We kept the first draft because it scored higher than the polished version.")
+
+        document_panel("resume", "resume", "Resume", template, stem, full_name, below_downloads=resume_score_chart)
 
     with tab_snapshot:
         st.caption("A half-page version a recruiter can scan in 10–15 seconds. Send it alongside your full "
@@ -498,7 +560,8 @@ if "last_result" in st.session_state and "docs" in st.session_state:
 
     with tab_ats:
         chart, table = ats_dumbbell_chart(before, after)
-        st.markdown(f"**ATS score: original vs. tailored resume** &nbsp;·&nbsp; {change:+d} points overall")
+        overall_note = "about the same overall" if not meaningful else f"{change:+d} points overall"
+        st.markdown(f"**ATS score: original vs. tailored resume** &nbsp;·&nbsp; {overall_note}")
         st.altair_chart(chart, width="stretch")
         st.caption("Both versions are scored the same way. Keyword match uses the skills you entered; "
                    "semantic match compares your resume to the job description.")

@@ -85,3 +85,10 @@ def test_broken_resume_output_shows_error(app, monkeypatch):
     monkeypatch.setattr(main, "call_llm", broken)
     at = generate(app)
     assert any("couldn't generate a complete resume" in e.value for e in at.error)
+
+
+def test_resume_tab_shows_score_bar_chart(app):
+    at = generate(app)
+    charts = at.get("vega_lite_chart")
+    assert len(charts) >= 2  # bar chart under downloads + dumbbell chart in the ATS tab
+    assert any("ATS score" in m.value for m in at.markdown)

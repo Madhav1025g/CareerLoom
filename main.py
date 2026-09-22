@@ -550,7 +550,35 @@ def is_usable_resume(text: str, source_text: str | None) -> bool:
 # RESUME WRITER AGENT (uses RAG-matched content when available)
 #----------------------
 
-def resume_writer_agent(user_request, matched_chunks=None):
+JD_PROMPT_CHARS = 4000  # keeps prompts within Groq's free-tier tokens-per-minute limit
+
+
+def tailoring_section(user_request, missing_keywords=None) -> str:
+    """Job-targeting instructions shared by the writer and optimizer, with strict no-fabrication rules."""
+    job_description = (user_request.get("job_description") or "").strip()
+    if not job_description:
+        return f"""
+    No job description was given — tailor the resume to a {user_request['current_role'] or 'role matching the candidate'} position.
+    """
+    gaps = ", ".join(map(str, missing_keywords or [])) or "none identified"
+    return f"""
+    TARGET JOB DESCRIPTION (tailor the resume to THIS role):
+    {job_description[:JD_PROMPT_CHARS]}
+
+    Skills/keywords this job asks for that the original resume under-represents: {gaps}
+
+    Tailoring rules:
+    - Open the PROFESSIONAL SUMMARY with the target role's title and the candidate's strengths most relevant to it.
+    - Mirror the job description's exact terminology wherever the candidate's real experience matches
+      (e.g. if the job says "CI/CD" and the resume says "automated deployments", write "CI/CD (automated deployments)").
+    - Within each job, put the most job-relevant bullets first. Order skill categories by relevance to the job.
+    - For each under-represented keyword: include it ONLY if the source resume shows the candidate genuinely has
+      that experience, possibly under different wording. NEVER add a skill, tool, certification, employer, title,
+      or metric that the source resume does not support. Honesty matters more than the score.
+    """
+
+
+def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None):
 
     log_event("Resume Writer Agent Started")
 
@@ -582,6 +610,7 @@ def resume_writer_agent(user_request, matched_chunks=None):
     Full source resume content (this is the complete and only source of truth — use ALL of it):
     {full_resume_text}
     {emphasis_section}
+    {tailoring_section(user_request, missing_keywords)}
     {RESUME_FORMAT_RULES}
     - CRITICAL: Include every distinct job, company, and project mentioned in the full source content above,
       with their real company names and dates exactly as given. NEVER write placeholders like "[Not Provided]"
@@ -623,6 +652,11 @@ def human_optimizer_agent(user_request, resume_text):
     - Remove AI generated patterns
     - Professional
     - ATS Friendly
+
+    This resume has been tailored to the job below. Keep that tailoring: preserve every job-description
+    keyword and specific technical term — never swap them for generic synonyms — and keep the most
+    job-relevant bullets first. Improve the wording only.
+    {tailoring_section(user_request)}
     {RESUME_FORMAT_RULES}
     - CRITICAL: Preserve every distinct job, company, and project entry from the resume below.
       Do not drop, merge, or summarize away any entry while rewriting — the output must contain
@@ -780,10 +814,10 @@ def recruiter_snapshot_agent(user_request, final_resume_text):
 
 PIPELINE_STEPS = [
     ("Profile Analyzer", "Reads your background and determines your experience level and domain."),
-    ("ATS Match", "Scores your resume against the job using semantic (RAG) and keyword matching."),
-    ("Resume Writer", "Drafts a tailored resume using your full resume as the only source of truth."),
+    ("ATS Match", "Scores your resume against the job (semantic RAG + keyword matching) and finds the gaps."),
+    ("Resume Writer", "Rewrites your resume for the job's requirements and terminology, never inventing experience."),
     ("Human Optimizer", "Polishes the draft so it reads naturally, not like AI-generated text."),
-    ("Completeness Check", "A guardrail that flags dropped jobs and rejects broken AI output."),
+    ("Completeness Check", "A guardrail that flags dropped jobs, rejects broken AI output, and keeps the higher-scoring version."),
     ("Reviewer", "Checks grammar, formatting, and consistency, with one-click fixes."),
     ("Recruiter Snapshot", "Condenses your resume into a half-page summary a recruiter can read in 15 seconds."),
     ("Cover Letter Writer", "Drafts a matching cover letter tailored to the same role."),
@@ -816,33 +850,48 @@ def orchestrator(user_request, request_id, progress_callback=None):
         # Resume chunks are only needed for retrieval — never keep them beyond this request.
         delete_resume_chunks(request_id)
 
-    # Agents that only need the original resume run in the background while the
-    # writer -> optimizer chain (which must run in order) runs here.
+    # The analyzer and cover letter only need the original resume, so they run in the background.
+    # ATS -> writer -> optimizer must run in order: the writer targets the gaps the ATS agent finds.
     with ThreadPoolExecutor(max_workers=3) as pool:
-        notify("Analyzing your profile, ATS match, and cover letter...")
+        notify("Analyzing your profile and ATS gaps...")
         analyzer_future = pool.submit(analyzer_agent, user_request, request_id)
-        ats_future = pool.submit(ats_agent, user_request, matched_chunks)
         cover_letter_future = pool.submit(cover_letter_agent, user_request, matched_chunks)
+        ats_output = ats_agent(user_request, matched_chunks)
 
         notify("Writing your tailored resume...")
-        resume_writer_output = resume_writer_agent(user_request, matched_chunks=matched_chunks)
+        resume_writer_output = resume_writer_agent(
+            user_request, matched_chunks=matched_chunks, missing_keywords=ats_output["missing_keywords"],
+        )
         draft_text = resume_writer_output["generated_resume"]
 
         notify("Polishing the final version...")
         human_optimizer_output = human_optimizer_agent(user_request, draft_text)
         polished_text = human_optimizer_output["human_friendly_resume"]
 
-        notify("Checking that nothing was dropped...")
-        # Guardrail: never let the polish step lose content the draft had — fall back to the draft instead.
+        notify("Checking content and picking the strongest version...")
+        # Guardrails: the polished version must be a usable resume, keep every entry the draft kept,
+        # and score at least as well against the job. Otherwise the draft is the better final resume.
         draft_completeness = check_completeness(resume_text, draft_text)
         polished_completeness = check_completeness(resume_text, polished_text)
-        if (not is_usable_resume(polished_text, resume_text)
-                or polished_completeness["completeness_pct"] < draft_completeness["completeness_pct"]):
-            log_event(f"{request_id}: Human Optimizer output rejected — using the Resume Writer draft")
-            human_optimizer_output = {"human_friendly_resume": draft_text, "fell_back_to_draft": True}
-            polished_completeness = draft_completeness
+        draft_scores = ats_breakdown(draft_text, job_description, user_request["skills"])
+        polished_scores = ats_breakdown(polished_text, job_description, user_request["skills"])
+        if not is_usable_resume(polished_text, resume_text):
+            fallback_reason = "unusable output"
+        elif polished_completeness["completeness_pct"] < draft_completeness["completeness_pct"]:
+            fallback_reason = "dropped content"
+        elif polished_scores["overall"] < draft_scores["overall"]:
+            fallback_reason = "lower ATS score"
+        else:
+            fallback_reason = None
+
+        if fallback_reason:
+            log_event(f"{request_id}: using the Resume Writer draft ({fallback_reason})")
+            human_optimizer_output = {"human_friendly_resume": draft_text, "fell_back_to_draft": True,
+                                      "fallback_reason": fallback_reason}
+            completeness_output, after = draft_completeness, draft_scores
+        else:
+            completeness_output, after = polished_completeness, polished_scores
         final_resume_text = human_optimizer_output["human_friendly_resume"]
-        completeness_output = polished_completeness
         if completeness_output["possibly_missing"]:
             log_event(f"{request_id}: WARNING — {len(completeness_output['possibly_missing'])} entries possibly dropped")
 
@@ -850,9 +899,7 @@ def orchestrator(user_request, request_id, progress_callback=None):
         reviewer_future = pool.submit(reviewer_agent, final_resume_text)
         snapshot_future = pool.submit(recruiter_snapshot_agent, user_request, final_resume_text)
 
-        ats_output = ats_future.result()
         ats_output["before"] = {k: ats_output[k] for k in ("ats_score", "keyword_score", "semantic_score")}
-        after = ats_breakdown(final_resume_text, job_description, user_request["skills"])
         ats_output["after"] = {"ats_score": after["overall"], "keyword_score": after["keyword"], "semantic_score": after["semantic"]}
 
         notify("Finishing up...")
