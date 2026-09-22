@@ -42,48 +42,48 @@ st.markdown("""
 .block-container { max-width: 1140px; padding-top: 2.2rem; padding-bottom: 3rem; }
 header[data-testid="stHeader"] { background: transparent; }
 
-.cf-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2.4rem; }
-.cf-brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; font-size: 1.25rem; color: #0F172A; letter-spacing: -0.01em; }
-.cf-mark { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+.cl-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2.4rem; }
+.cl-brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; font-size: 1.25rem; color: #0F172A; letter-spacing: -0.01em; }
+.cl-mark { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
            border-radius: 8px; background: #1E3A8A; color: #fff; font-size: 0.85rem; font-weight: 700; }
-.cf-mark span { color: #F59E0B; }
-.cf-pill { font-size: 0.78rem; font-weight: 600; color: #1E3A8A; background: #EEF2FF; border: 1px solid #DCE3F9;
+.cl-mark span { color: #F59E0B; }
+.cl-pill { font-size: 0.78rem; font-weight: 600; color: #1E3A8A; background: #EEF2FF; border: 1px solid #DCE3F9;
            padding: 0.3rem 0.75rem; border-radius: 999px; }
 
-.cf-hero { padding: 0.5rem 0 1.8rem 0; max-width: 780px; }
-.cf-eyebrow { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.75rem; font-weight: 700; color: #B45309; margin-bottom: 0.7rem; }
-.cf-h1 { font-size: 2.6rem; line-height: 1.12; font-weight: 700; color: #0F172A; letter-spacing: -0.025em; margin-bottom: 0.9rem; }
-.cf-lead { font-size: 1.08rem; line-height: 1.6; color: #475569; }
+.cl-hero { padding: 0.5rem 0 1.8rem 0; max-width: 780px; }
+.cl-eyebrow { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.75rem; font-weight: 700; color: #B45309; margin-bottom: 0.7rem; }
+.cl-h1 { font-size: 2.6rem; line-height: 1.12; font-weight: 700; color: #0F172A; letter-spacing: -0.025em; margin-bottom: 0.9rem; }
+.cl-lead { font-size: 1.08rem; line-height: 1.6; color: #475569; }
 
-.cf-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin-bottom: 2.6rem; }
-.cf-feature { border: 1px solid #E3E7EF; border-radius: 12px; padding: 1.1rem 1.2rem; background: #FAFBFD; }
-.cf-feature-title { font-weight: 600; color: #0F172A; margin-bottom: 0.3rem; }
-.cf-feature-text { font-size: 0.9rem; color: #64748B; line-height: 1.5; }
+.cl-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin-bottom: 2.6rem; }
+.cl-feature { border: 1px solid #E3E7EF; border-radius: 12px; padding: 1.1rem 1.2rem; background: #FAFBFD; }
+.cl-feature-title { font-weight: 600; color: #0F172A; margin-bottom: 0.3rem; }
+.cl-feature-text { font-size: 0.9rem; color: #64748B; line-height: 1.5; }
 
-.cf-section-title { font-size: 1.45rem; font-weight: 700; color: #0F172A; letter-spacing: -0.015em; margin: 0.4rem 0 0.2rem 0; }
-.cf-section-sub { color: #64748B; font-size: 0.95rem; margin-bottom: 1rem; }
-.cf-card-title { font-weight: 600; font-size: 1rem; color: #0F172A; margin-bottom: 0.2rem; }
-.cf-privacy { font-size: 0.82rem; color: #64748B; text-align: center; margin-top: 0.6rem; }
+.cl-section-title { font-size: 1.45rem; font-weight: 700; color: #0F172A; letter-spacing: -0.015em; margin: 0.4rem 0 0.2rem 0; }
+.cl-section-sub { color: #64748B; font-size: 0.95rem; margin-bottom: 1rem; }
+.cl-card-title { font-weight: 600; font-size: 1rem; color: #0F172A; margin-bottom: 0.2rem; }
+.cl-privacy { font-size: 0.82rem; color: #64748B; text-align: center; margin-top: 0.6rem; }
 
-.cf-doc { background: #fff; border: 1px solid #E3E7EF; border-radius: 10px; padding: 2.2rem 2.5rem;
+.cl-doc { background: #fff; border: 1px solid #E3E7EF; border-radius: 10px; padding: 2.2rem 2.5rem;
           box-shadow: 0 1px 3px rgba(15,23,42,.05), 0 10px 30px rgba(15,23,42,.06);
           color: #111827; font-size: 0.9rem; line-height: 1.5; max-height: 1000px; overflow-y: auto; }
-.cf-doc p { margin: 0.12rem 0 !important; font-size: 0.9rem !important; }
-.cf-doc ul { margin: 0.15rem 0 0.35rem 1.1rem !important; padding: 0 !important; }
-.cf-doc li { margin: 0.08rem 0 !important; font-size: 0.9rem !important; }
-.cf-name { text-align: center; font-size: 1.6rem; font-weight: 700; color: #1E3A8A; letter-spacing: -0.01em; }
-.cf-contact { text-align: center; color: #64748B; font-size: 0.8rem; margin-top: 0.15rem; }
-.cf-heading { margin: 1.1rem 0 0.45rem 0; padding-bottom: 0.2rem; border-bottom: 1.5px solid #1E3A8A;
+.cl-doc p { margin: 0.12rem 0 !important; font-size: 0.9rem !important; }
+.cl-doc ul { margin: 0.15rem 0 0.35rem 1.1rem !important; padding: 0 !important; }
+.cl-doc li { margin: 0.08rem 0 !important; font-size: 0.9rem !important; }
+.cl-name { text-align: center; font-size: 1.6rem; font-weight: 700; color: #1E3A8A; letter-spacing: -0.01em; }
+.cl-contact { text-align: center; color: #64748B; font-size: 0.8rem; margin-top: 0.15rem; }
+.cl-heading { margin: 1.1rem 0 0.45rem 0; padding-bottom: 0.2rem; border-bottom: 1.5px solid #1E3A8A;
               color: #1E3A8A; font-weight: 700; font-size: 0.8rem; letter-spacing: 0.08em; }
-.cf-entry { font-weight: 600; margin-top: 0.55rem; }
-.cf-letter { padding: 2.6rem 3rem; }
-.cf-letter p { margin: 0 0 0.9rem 0 !important; }
+.cl-entry { font-weight: 600; margin-top: 0.55rem; }
+.cl-letter { padding: 2.6rem 3rem; }
+.cl-letter p { margin: 0 0 0.9rem 0 !important; }
 
-.cf-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 1rem 0; }
-.cf-chip { font-size: 0.8rem; font-weight: 500; color: #9A3412; background: #FFF7ED; border: 1px solid #FED7AA;
+.cl-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 1rem 0; }
+.cl-chip { font-size: 0.8rem; font-weight: 500; color: #9A3412; background: #FFF7ED; border: 1px solid #FED7AA;
            border-radius: 999px; padding: 0.2rem 0.65rem; }
 
-.cf-footer { border-top: 1px solid #E3E7EF; margin-top: 3rem; padding-top: 1.2rem; color: #94A3B8; font-size: 0.82rem;
+.cl-footer { border-top: 1px solid #E3E7EF; margin-top: 3rem; padding-top: 1.2rem; color: #94A3B8; font-size: 0.82rem;
              display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -92,28 +92,28 @@ header[data-testid="stHeader"] { background: transparent; }
 # Header + hero
 # ------------------------------------------------------------------
 st.markdown(f"""
-<div class="cf-nav">
-  <div class="cf-brand"><span class="cf-mark">C<span>F</span></span>{APP_NAME}</div>
-  <div class="cf-pill">Free &middot; No sign-up required</div>
+<div class="cl-nav">
+  <div class="cl-brand"><span class="cl-mark">C<span>L</span></span>{APP_NAME}</div>
+  <div class="cl-pill">Free &middot; No sign-up required</div>
 </div>
-<div class="cf-hero">
-  <div class="cf-eyebrow">AI career document platform</div>
-  <div class="cf-h1">Tailor your resume to every job you apply for.</div>
-  <div class="cf-lead">{APP_NAME} reads your resume and the job description, scores your ATS match,
+<div class="cl-hero">
+  <div class="cl-eyebrow">AI career document platform</div>
+  <div class="cl-h1">Tailor your resume to every job you apply for.</div>
+  <div class="cl-lead">{APP_NAME} reads your resume and the job description, scores your ATS match,
   rewrites your resume for the role, and drafts a matching cover letter &mdash; in about 30 seconds.</div>
 </div>
-<div class="cf-features">
-  <div class="cf-feature">
-    <div class="cf-feature-title">ATS match scoring</div>
-    <div class="cf-feature-text">Semantic and keyword matching show how well you fit the role and exactly what's missing.</div>
+<div class="cl-features">
+  <div class="cl-feature">
+    <div class="cl-feature-title">ATS match scoring</div>
+    <div class="cl-feature-text">Semantic and keyword matching show how well you fit the role and exactly what's missing.</div>
   </div>
-  <div class="cf-feature">
-    <div class="cf-feature-title">Tailored resume &amp; cover letter</div>
-    <div class="cf-feature-text">A seven-step AI pipeline rewrites your resume for the role without dropping your experience.</div>
+  <div class="cl-feature">
+    <div class="cl-feature-title">Tailored resume &amp; cover letter</div>
+    <div class="cl-feature-text">A seven-step AI pipeline rewrites your resume for the role without dropping your experience.</div>
   </div>
-  <div class="cf-feature">
-    <div class="cf-feature-title">Recruiter-ready exports</div>
-    <div class="cf-feature-text">Download cleanly formatted PDF and Word documents, ready to submit.</div>
+  <div class="cl-feature">
+    <div class="cl-feature-title">Recruiter-ready exports</div>
+    <div class="cl-feature-text">Download cleanly formatted PDF and Word documents, ready to submit.</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -203,8 +203,8 @@ if "generation_count" not in st.session_state:
 # ------------------------------------------------------------------
 title_col, sample_col = st.columns([4, 1], vertical_alignment="bottom")
 with title_col:
-    st.markdown('<div class="cf-section-title">Build your application</div>'
-                '<div class="cf-section-sub">Add your details and resume. A job description unlocks ATS matching and a tailored cover letter.</div>',
+    st.markdown('<div class="cl-section-title">Build your application</div>'
+                '<div class="cl-section-sub">Add your details and resume. A job description unlocks ATS matching and a tailored cover letter.</div>',
                 unsafe_allow_html=True)
 with sample_col:
     if st.button("Load example", width="stretch"):
@@ -220,7 +220,7 @@ left, right = st.columns(2, gap="large")
 
 with left:
     with st.container(border=True):
-        st.markdown('<div class="cf-card-title">Your profile</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cl-card-title">Your profile</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
             full_name = st.text_input("Full name", key="full_name")
@@ -230,7 +230,7 @@ with left:
             skills_input = st.text_input("Key skills (comma-separated)", placeholder="Python, FastAPI, AWS", key="skills_input")
 
     with st.container(border=True):
-        st.markdown('<div class="cf-card-title">Your resume</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cl-card-title">Your resume</div>', unsafe_allow_html=True)
         input_mode = st.segmented_control(
             "Resume input", ["Upload a file", "Paste text"], default="Upload a file", label_visibility="collapsed",
         ) or "Upload a file"
@@ -252,7 +252,7 @@ with left:
 
 with right:
     with st.container(border=True):
-        st.markdown('<div class="cf-card-title">Target job <span style="font-weight:400;color:#94A3B8">(recommended)</span></div>',
+        st.markdown('<div class="cl-card-title">Target job <span style="font-weight:400;color:#94A3B8">(recommended)</span></div>',
                     unsafe_allow_html=True)
         job_description = st.text_area(
             "Job description",
@@ -272,7 +272,7 @@ else:
     generate_clicked = st.button("Generate my application", type="primary", width="stretch")
 
 st.markdown(
-    f'<div class="cf-privacy">Your resume is sent to our AI provider only to generate your results. '
+    f'<div class="cl-privacy">Your resume is sent to our AI provider only to generate your results. '
     f'{APP_NAME} does not store it.</div>',
     unsafe_allow_html=True,
 )
@@ -339,8 +339,8 @@ if "last_result" in st.session_state:
     analyzer = workflow.get("analyzer", {}) if isinstance(workflow.get("analyzer"), dict) else {}
 
     st.write("")
-    st.markdown(f'<div class="cf-section-title">Your results</div>'
-                f'<div class="cf-section-sub">Generated in {result["execution_time"]} seconds.</div>',
+    st.markdown(f'<div class="cl-section-title">Your results</div>'
+                f'<div class="cl-section-sub">Generated in {result["execution_time"]} seconds.</div>',
                 unsafe_allow_html=True)
 
     m1, m2, m3, m4 = st.columns(4)
@@ -366,7 +366,7 @@ if "last_result" in st.session_state:
         with doc_col:
             st.markdown(resume_to_html(st.session_state.editable_resume), unsafe_allow_html=True)
         with action_col:
-            st.markdown('<div class="cf-card-title">Download</div>', unsafe_allow_html=True)
+            st.markdown('<div class="cl-card-title">Download</div>', unsafe_allow_html=True)
             st.download_button(
                 "PDF", data=build_resume_pdf(st.session_state.editable_resume),
                 file_name=f"{stem}_Resume.pdf", mime="application/pdf", type="primary", width="stretch",
@@ -391,7 +391,7 @@ if "last_result" in st.session_state:
         with doc_col:
             st.markdown(letter_to_html(cover_letter), unsafe_allow_html=True)
         with action_col:
-            st.markdown('<div class="cf-card-title">Download</div>', unsafe_allow_html=True)
+            st.markdown('<div class="cl-card-title">Download</div>', unsafe_allow_html=True)
             st.download_button(
                 "PDF", data=build_letter_pdf(cover_letter, full_name),
                 file_name=f"{stem}_Cover_Letter.pdf", mime="application/pdf", type="primary", width="stretch",
@@ -423,9 +423,9 @@ if "last_result" in st.session_state:
             if explanation:
                 st.markdown(f"**Why this score**\n\n{explanation}")
             if missing_keywords:
-                chips = "".join(f'<span class="cf-chip">{html.escape(str(kw))}</span>' for kw in missing_keywords)
+                chips = "".join(f'<span class="cl-chip">{html.escape(str(kw))}</span>' for kw in missing_keywords)
                 st.markdown("**Missing or under-represented skills**")
-                st.markdown(f'<div class="cf-chips">{chips}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="cl-chips">{chips}</div>', unsafe_allow_html=True)
             with st.expander("Raw agent output"):
                 st.code(ats_data.get("llm_feedback", ""), language=None)
 
@@ -476,7 +476,7 @@ with st.expander(f"How {APP_NAME} works — a {len(PIPELINE_STEPS)}-step AI pipe
     ))
 
 st.markdown(f"""
-<div class="cf-footer">
+<div class="cl-footer">
   <div>&copy; {date.today().year} {APP_NAME}. Built by Madhav G.</div>
   <div>Your data is processed only to generate your results and is never stored.</div>
 </div>
