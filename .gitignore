@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets — never commit these
+.env
+.streamlit/secrets.toml
+
+# Logs (may contain user data)
+*.log
+resume_generator_logs*.txt
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

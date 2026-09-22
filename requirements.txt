@@ -4,7 +4,7 @@ pydantic
 python-dotenv
 openai
 groq
-streamlit
+streamlit>=1.46
 pypdf
 python-docx
 requests

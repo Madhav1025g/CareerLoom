@@ -1,148 +1,138 @@
+import html
 import os
-import io
+import re
 import uuid
+from datetime import date
+
 import requests
 import streamlit as st
 
 # ------------------------------------------------------------------
-# Load secrets (API keys) from Streamlit Cloud's secrets manager
+# Load secrets (API keys) from Streamlit Cloud's secrets manager.
+# Locally there may be no secrets.toml — main.py falls back to .env.
 # ------------------------------------------------------------------
-for key in ["OPENAI_API_KEY", "GROQ_API_KEY", "QDRANT_URL", "QDRANT_API_KEY", "LLM_PROVIDER", "API_KEY_HERE"]:
-    if key in st.secrets:
-        os.environ[key] = st.secrets[key]
+try:
+    for key in ["OPENAI_API_KEY", "GROQ_API_KEY", "QDRANT_URL", "QDRANT_API_KEY", "LLM_PROVIDER", "API_KEY_HERE"]:
+        if key in st.secrets:
+            os.environ[key] = st.secrets[key]
+except Exception:
+    pass
 
-from main import orchestrator
-
-# ------------------------------------------------------------------
-# Page setup + custom styling
-# ------------------------------------------------------------------
-st.set_page_config(page_title="AI Resume & Cover Letter Generator", page_icon="📄", layout="centered")
-
-st.markdown("""
-<style>
-.hero {
-    background: linear-gradient(90deg, #4F46E5 0%, #9333EA 100%);
-    padding: 2rem 1.5rem 1.5rem 1.5rem;
-    border-radius: 16px;
-    color: white;
-    margin-bottom: 0.75rem;
-}
-.hero h1 { margin: 0; font-size: 2.2rem; }
-.hero p { margin-top: 0.4rem; opacity: 0.9; }
-.badge-row { margin-bottom: 1.2rem; }
-.badge {
-    display: inline-block;
-    background: #F3F0FF;
-    color: #4F46E5;
-    border-radius: 999px;
-    padding: 0.25rem 0.8rem;
-    font-size: 0.8rem;
-    font-weight: 600;
-    margin-right: 0.4rem;
-    margin-bottom: 0.4rem;
-}
-.privacy-note {
-    font-size: 0.85rem;
-    color: #6B7280;
-    text-align: center;
-    margin-top: 0.5rem;
-}
-div.stButton > button, div.stDownloadButton > button {
-    background: linear-gradient(90deg, #4F46E5 0%, #9333EA 100%);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 0.6rem 1.4rem;
-    font-weight: 600;
-}
-div.stButton > button:hover, div.stDownloadButton > button:hover {
-    opacity: 0.9;
-    color: white;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<div class="hero">
-    <h1>📄 AI Resume & Cover Letter Generator</h1>
-    <p>Upload your resume and a job description — a multi-agent AI pipeline tailors your resume, scores it for ATS match, and drafts a matching cover letter, all in one pass.</p>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<style>
-.coffee-loader {
-    text-align: center;
-    padding: 1rem 0 0.5rem 0;
-}
-.coffee-loader .cup {
-    font-size: 3rem;
-    display: inline-block;
-    animation: coffee-bounce 1.4s ease-in-out infinite;
-}
-.coffee-loader p {
-    color: #6B7280;
-    font-weight: 600;
-    margin-top: 0.3rem;
-}
-@keyframes coffee-bounce {
-    0%, 100% { transform: translateY(0) rotate(0deg); }
-    50% { transform: translateY(-12px) rotate(-6deg); }
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown(
-    '<div class="badge-row">'
-    '<span class="badge">⚡ Groq LLM</span>'
-    '<span class="badge">🧠 Multi-Agent</span>'
-    '<span class="badge">🔍 RAG Matching</span>'
-    '<span class="badge">🐍 FastAPI</span>'
-    '</div>',
-    unsafe_allow_html=True,
+from main import APP_NAME, PIPELINE_STEPS, LLMUnavailableError, log_event, orchestrator
+from document_builder import (
+    build_letter_docx,
+    build_letter_pdf,
+    build_resume_docx,
+    build_resume_pdf,
+    letter_to_html,
+    resume_to_html,
 )
 
 # ------------------------------------------------------------------
-# Usage counter (free, external, persists across app restarts)
+# Page setup + styling
+# ------------------------------------------------------------------
+st.set_page_config(
+    page_title=f"{APP_NAME} | AI Resume & Cover Letter Builder",
+    page_icon="assets/favicon.png",
+    layout="wide",
+)
+
+st.markdown("""
+<style>
+.block-container { max-width: 1140px; padding-top: 2.2rem; padding-bottom: 3rem; }
+header[data-testid="stHeader"] { background: transparent; }
+
+.cf-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2.4rem; }
+.cf-brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; font-size: 1.25rem; color: #0F172A; letter-spacing: -0.01em; }
+.cf-mark { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+           border-radius: 8px; background: #1E3A8A; color: #fff; font-size: 0.85rem; font-weight: 700; }
+.cf-mark span { color: #F59E0B; }
+.cf-pill { font-size: 0.78rem; font-weight: 600; color: #1E3A8A; background: #EEF2FF; border: 1px solid #DCE3F9;
+           padding: 0.3rem 0.75rem; border-radius: 999px; }
+
+.cf-hero { padding: 0.5rem 0 1.8rem 0; max-width: 780px; }
+.cf-eyebrow { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.75rem; font-weight: 700; color: #B45309; margin-bottom: 0.7rem; }
+.cf-h1 { font-size: 2.6rem; line-height: 1.12; font-weight: 700; color: #0F172A; letter-spacing: -0.025em; margin-bottom: 0.9rem; }
+.cf-lead { font-size: 1.08rem; line-height: 1.6; color: #475569; }
+
+.cf-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin-bottom: 2.6rem; }
+.cf-feature { border: 1px solid #E3E7EF; border-radius: 12px; padding: 1.1rem 1.2rem; background: #FAFBFD; }
+.cf-feature-title { font-weight: 600; color: #0F172A; margin-bottom: 0.3rem; }
+.cf-feature-text { font-size: 0.9rem; color: #64748B; line-height: 1.5; }
+
+.cf-section-title { font-size: 1.45rem; font-weight: 700; color: #0F172A; letter-spacing: -0.015em; margin: 0.4rem 0 0.2rem 0; }
+.cf-section-sub { color: #64748B; font-size: 0.95rem; margin-bottom: 1rem; }
+.cf-card-title { font-weight: 600; font-size: 1rem; color: #0F172A; margin-bottom: 0.2rem; }
+.cf-privacy { font-size: 0.82rem; color: #64748B; text-align: center; margin-top: 0.6rem; }
+
+.cf-doc { background: #fff; border: 1px solid #E3E7EF; border-radius: 10px; padding: 2.2rem 2.5rem;
+          box-shadow: 0 1px 3px rgba(15,23,42,.05), 0 10px 30px rgba(15,23,42,.06);
+          color: #111827; font-size: 0.9rem; line-height: 1.5; max-height: 1000px; overflow-y: auto; }
+.cf-doc p { margin: 0.12rem 0 !important; font-size: 0.9rem !important; }
+.cf-doc ul { margin: 0.15rem 0 0.35rem 1.1rem !important; padding: 0 !important; }
+.cf-doc li { margin: 0.08rem 0 !important; font-size: 0.9rem !important; }
+.cf-name { text-align: center; font-size: 1.6rem; font-weight: 700; color: #1E3A8A; letter-spacing: -0.01em; }
+.cf-contact { text-align: center; color: #64748B; font-size: 0.8rem; margin-top: 0.15rem; }
+.cf-heading { margin: 1.1rem 0 0.45rem 0; padding-bottom: 0.2rem; border-bottom: 1.5px solid #1E3A8A;
+              color: #1E3A8A; font-weight: 700; font-size: 0.8rem; letter-spacing: 0.08em; }
+.cf-entry { font-weight: 600; margin-top: 0.55rem; }
+.cf-letter { padding: 2.6rem 3rem; }
+.cf-letter p { margin: 0 0 0.9rem 0 !important; }
+
+.cf-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 1rem 0; }
+.cf-chip { font-size: 0.8rem; font-weight: 500; color: #9A3412; background: #FFF7ED; border: 1px solid #FED7AA;
+           border-radius: 999px; padding: 0.2rem 0.65rem; }
+
+.cf-footer { border-top: 1px solid #E3E7EF; margin-top: 3rem; padding-top: 1.2rem; color: #94A3B8; font-size: 0.82rem;
+             display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
+</style>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------------------
+# Header + hero
+# ------------------------------------------------------------------
+st.markdown(f"""
+<div class="cf-nav">
+  <div class="cf-brand"><span class="cf-mark">C<span>F</span></span>{APP_NAME}</div>
+  <div class="cf-pill">Free &middot; No sign-up required</div>
+</div>
+<div class="cf-hero">
+  <div class="cf-eyebrow">AI career document platform</div>
+  <div class="cf-h1">Tailor your resume to every job you apply for.</div>
+  <div class="cf-lead">{APP_NAME} reads your resume and the job description, scores your ATS match,
+  rewrites your resume for the role, and drafts a matching cover letter &mdash; in about 30 seconds.</div>
+</div>
+<div class="cf-features">
+  <div class="cf-feature">
+    <div class="cf-feature-title">ATS match scoring</div>
+    <div class="cf-feature-text">Semantic and keyword matching show how well you fit the role and exactly what's missing.</div>
+  </div>
+  <div class="cf-feature">
+    <div class="cf-feature-title">Tailored resume &amp; cover letter</div>
+    <div class="cf-feature-text">A seven-step AI pipeline rewrites your resume for the role without dropping your experience.</div>
+  </div>
+  <div class="cf-feature">
+    <div class="cf-feature-title">Recruiter-ready exports</div>
+    <div class="cf-feature-text">Download cleanly formatted PDF and Word documents, ready to submit.</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------------------
+# Usage counter (owner analytics only — not shown on the page)
 # ------------------------------------------------------------------
 COUNTER_NAMESPACE = "ai-resume-generator-demo"
 COUNTER_KEY = "resumes-generated"
 
-def get_counter_count():
-    try:
-        resp = requests.get(f"https://api.counterapi.dev/v1/{COUNTER_NAMESPACE}/{COUNTER_KEY}", timeout=3)
-        return resp.json().get("count", None)
-    except Exception:
-        return None
 
 def increment_counter():
     try:
-        resp = requests.get(f"https://api.counterapi.dev/v1/{COUNTER_NAMESPACE}/{COUNTER_KEY}/up", timeout=3)
-        return resp.json().get("count", None)
+        requests.get(f"https://api.counterapi.dev/v1/{COUNTER_NAMESPACE}/{COUNTER_KEY}/up", timeout=3)
     except Exception:
-        return None
-
-current_count = get_counter_count()
-if current_count is not None:
-    st.caption(f"✨ {current_count} resumes generated so far by people using this tool")
+        pass
 
 # ------------------------------------------------------------------
-# How it works
-# ------------------------------------------------------------------
-with st.expander("ℹ️ How this works (5-agent pipeline)"):
-    st.markdown("""
-1. **Profile Analyzer** — reads your background and experience level
-2. **ATS Optimizer** — scores your resume against the job description using semantic + keyword matching
-3. **Resume Writer** — drafts a tailored first version
-4. **Reviewer** — checks grammar, formatting, and consistency
-5. **Human Optimizer** — polishes the final version to sound natural, not AI-generated
-6. **Cover Letter Writer** — drafts a matching cover letter using the same context
-
-All steps run automatically in sequence — you'll see live progress below once you click Generate.
-    """)
-
-# ------------------------------------------------------------------
-# File parsing helpers
+# Helpers
 # ------------------------------------------------------------------
 def extract_text_from_upload(uploaded_file):
     if uploaded_file is None:
@@ -165,53 +155,8 @@ def extract_text_from_upload(uploaded_file):
     return None
 
 
-def build_docx_bytes(text: str) -> bytes:
-    import docx
-    document = docx.Document()
-    for line in text.split("\n"):
-        document.add_paragraph(line)
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
-
-
-def build_pdf_bytes(text: str) -> bytes:
-    from fpdf import FPDF
-
-    # Core PDF fonts only support latin-1 — sanitize common unicode punctuation
-    replacements = {
-        "\u2014": "-", "\u2013": "-", "\u2018": "'", "\u2019": "'",
-        "\u201c": '"', "\u201d": '"', "\u2022": "-", "\u2026": "...",
-    }
-    safe_text = text
-    for old, new in replacements.items():
-        safe_text = safe_text.replace(old, new)
-    safe_text = safe_text.encode("latin-1", errors="replace").decode("latin-1")
-
-    # fpdf2's word-wrap can't break a single unbroken "word" longer than the page
-    # width (e.g. a long URL or run-on token) — pre-break anything too long.
-    def break_long_word(word, max_len=50):
-        if len(word) <= max_len:
-            return word
-        return " ".join(word[i:i + max_len] for i in range(0, len(word), max_len))
-
-    wrapped_lines = []
-    for line in safe_text.split("\n"):
-        words = line.split(" ")
-        wrapped_lines.append(" ".join(break_long_word(w) for w in words))
-    safe_text = "\n".join(wrapped_lines)
-
-    pdf = FPDF()
-    pdf.set_margins(15, 15, 15)
-    pdf.add_page()
-    pdf.set_font("Helvetica", size=10)
-    for line in safe_text.split("\n"):
-        pdf.set_x(pdf.l_margin)  # multi_cell leaves x at the right margin otherwise, crashing the next call
-        if line.strip() == "":
-            pdf.ln(5)
-        else:
-            pdf.multi_cell(0, 6, line)
-    return bytes(pdf.output())
+def file_stem(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_") or APP_NAME
 
 
 SAMPLE_RESUME = """Jordan Lee
@@ -239,7 +184,7 @@ and is comfortable working in an Agile team environment.
 """
 
 # ------------------------------------------------------------------
-# Sample data button
+# Session state
 # ------------------------------------------------------------------
 if "full_name" not in st.session_state:
     st.session_state.full_name = ""
@@ -249,229 +194,246 @@ if "full_name" not in st.session_state:
     st.session_state.resume_text_area = ""
     st.session_state.job_description_area = ""
 
-if st.button("🎬 Try with sample data instead"):
-    st.session_state.full_name = "Jordan Lee"
-    st.session_state.current_role = "Software Engineer"
-    st.session_state.skills_input = "Python, FastAPI, AWS, Docker, PostgreSQL, REST APIs, Git"
-    st.session_state.experience_years = 5
-    st.session_state.resume_text_area = SAMPLE_RESUME
-    st.session_state.job_description_area = SAMPLE_JD
-    st.rerun()
-
-# ------------------------------------------------------------------
-# Input section
-# ------------------------------------------------------------------
-with st.container(border=True):
-    st.subheader("1. Your Details")
-    col1, col2 = st.columns(2)
-    with col1:
-        full_name = st.text_input("Full Name", key="full_name")
-        experience_years = st.number_input("Years of Experience", min_value=0, max_value=50, step=1, key="experience_years")
-    with col2:
-        current_role = st.text_input("Current Role", placeholder="e.g. Software Engineer", key="current_role")
-        skills_input = st.text_input("Skills (comma-separated)", placeholder="Python, FastAPI, AWS", key="skills_input")
-
-with st.container(border=True):
-    st.subheader("2. Your Resume")
-    input_mode = st.radio("How would you like to provide your resume?", ["Upload a file", "Paste text"], horizontal=True)
-
-    resume_text = None
-    if input_mode == "Upload a file":
-        uploaded_file = st.file_uploader("Upload your resume (PDF, DOCX, or TXT)", type=["pdf", "docx", "txt"])
-        if uploaded_file is not None:
-            resume_text = extract_text_from_upload(uploaded_file)
-            if resume_text:
-                st.success(f"Loaded {uploaded_file.name} ({len(resume_text)} characters)")
-            else:
-                st.error("Couldn't read that file — try TXT or DOCX instead.")
-        elif st.session_state.resume_text_area:
-            resume_text = st.session_state.resume_text_area
-            st.info("Using sample resume text (switch to 'Paste text' to view/edit it).")
-    else:
-        resume_text = st.text_area("Paste your resume text here", height=220, key="resume_text_area")
-
-with st.container(border=True):
-    st.subheader("3. Job Description (optional, enables smart matching + tailored cover letter)")
-    job_description = st.text_area("Paste the job description here", height=150, key="job_description_area")
-
-st.write("")
-
 MAX_GENERATIONS_PER_SESSION = 3
 if "generation_count" not in st.session_state:
     st.session_state.generation_count = 0
 
+# ------------------------------------------------------------------
+# Input section
+# ------------------------------------------------------------------
+title_col, sample_col = st.columns([4, 1], vertical_alignment="bottom")
+with title_col:
+    st.markdown('<div class="cf-section-title">Build your application</div>'
+                '<div class="cf-section-sub">Add your details and resume. A job description unlocks ATS matching and a tailored cover letter.</div>',
+                unsafe_allow_html=True)
+with sample_col:
+    if st.button("Load example", width="stretch"):
+        st.session_state.full_name = "Jordan Lee"
+        st.session_state.current_role = "Software Engineer"
+        st.session_state.skills_input = "Python, FastAPI, AWS, Docker, PostgreSQL, REST APIs, Git"
+        st.session_state.experience_years = 5
+        st.session_state.resume_text_area = SAMPLE_RESUME
+        st.session_state.job_description_area = SAMPLE_JD
+        st.rerun()
+
+left, right = st.columns(2, gap="large")
+
+with left:
+    with st.container(border=True):
+        st.markdown('<div class="cf-card-title">Your profile</div>', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            full_name = st.text_input("Full name", key="full_name")
+            experience_years = st.number_input("Years of experience", min_value=0, max_value=50, step=1, key="experience_years")
+        with col2:
+            current_role = st.text_input("Current role", placeholder="e.g. Software Engineer", key="current_role")
+            skills_input = st.text_input("Key skills (comma-separated)", placeholder="Python, FastAPI, AWS", key="skills_input")
+
+    with st.container(border=True):
+        st.markdown('<div class="cf-card-title">Your resume</div>', unsafe_allow_html=True)
+        input_mode = st.segmented_control(
+            "Resume input", ["Upload a file", "Paste text"], default="Upload a file", label_visibility="collapsed",
+        ) or "Upload a file"
+
+        resume_text = None
+        if input_mode == "Upload a file":
+            uploaded_file = st.file_uploader("Upload your resume (PDF, DOCX, or TXT)", type=["pdf", "docx", "txt"])
+            if uploaded_file is not None:
+                resume_text = extract_text_from_upload(uploaded_file)
+                if resume_text:
+                    st.success(f"Loaded {uploaded_file.name} ({len(resume_text):,} characters)")
+                else:
+                    st.error("We couldn't read that file. Try a DOCX or TXT version instead.")
+            elif st.session_state.resume_text_area:
+                resume_text = st.session_state.resume_text_area
+                st.info("Using the example resume. Switch to “Paste text” to view or edit it.")
+        else:
+            resume_text = st.text_area("Paste your resume", height=240, key="resume_text_area")
+
+with right:
+    with st.container(border=True):
+        st.markdown('<div class="cf-card-title">Target job <span style="font-weight:400;color:#94A3B8">(recommended)</span></div>',
+                    unsafe_allow_html=True)
+        job_description = st.text_area(
+            "Job description",
+            height=372,
+            key="job_description_area",
+            placeholder="Paste the full job description here...",
+        )
+
 remaining = MAX_GENERATIONS_PER_SESSION - st.session_state.generation_count
 if remaining <= 0:
     st.warning(
-        f"You've reached the limit of {MAX_GENERATIONS_PER_SESSION} generations for this session "
-        "(this keeps the free demo available for everyone). Refresh the page to reset, or try again later."
+        f"You've reached the limit of {MAX_GENERATIONS_PER_SESSION} generations for this session. "
+        "This keeps the service free for everyone — please come back later."
     )
     generate_clicked = False
 else:
-    st.caption(f"{remaining} generation(s) remaining this session")
-    generate_clicked = st.button("✨ Generate Resume + Cover Letter", use_container_width=True)
+    generate_clicked = st.button("Generate my application", type="primary", width="stretch")
 
-st.markdown('<p class="privacy-note">🔒 Your resume text isn\'t stored anywhere — it only exists for the duration of this session.</p>', unsafe_allow_html=True)
+st.markdown(
+    f'<div class="cf-privacy">Your resume is sent to our AI provider only to generate your results. '
+    f'{APP_NAME} does not store it.</div>',
+    unsafe_allow_html=True,
+)
 
 # ------------------------------------------------------------------
 # Run pipeline with live progress
 # ------------------------------------------------------------------
 if generate_clicked:
     if not full_name or not resume_text:
-        st.error("Please provide at least your name and a resume (uploaded or pasted).")
+        st.error("Please add at least your name and your resume.")
     else:
-        coffee_placeholder = st.empty()
-        coffee_placeholder.markdown("""
-        <div class="coffee-loader">
-            <div class="cup">☕</div>
-            <p>Brewing your resume... grab a coffee, this takes about 20-30 seconds</p>
-        </div>
-        """, unsafe_allow_html=True)
+        user_request = {
+            "full_name": full_name,
+            "current_role": current_role,
+            "skills": [s.strip() for s in skills_input.split(",") if s.strip()],
+            "experience_years": int(experience_years),
+            "resume_text": resume_text,
+            "resume_file": None,
+            "job_description": job_description or None,
+        }
+        request_id = str(uuid.uuid4())
 
-        with st.status("Starting AI agents...", expanded=True) as status:
+        result = None
+        with st.status("Generating your application...", expanded=True) as status:
             def update(msg):
                 status.update(label=msg)
-                st.write(f"→ {msg}")
+                st.write(msg)
 
-            user_request = {
-                "api_key": "internal",
-                "full_name": full_name,
-                "current_role": current_role,
-                "skills": [s.strip() for s in skills_input.split(",") if s.strip()],
-                "experience_years": int(experience_years),
-                "resume_text": resume_text,
-                "resume_file": None,
-                "job_description": job_description or None,
-            }
-            request_id = str(uuid.uuid4())
-            result = orchestrator(user_request, request_id, progress_callback=update)
-            status.update(label="All agents finished!", state="complete")
+            try:
+                result = orchestrator(user_request, request_id, progress_callback=update)
+                status.update(label="Your application is ready", state="complete", expanded=False)
+            except LLMUnavailableError:
+                status.update(label="Generation failed", state="error")
+                st.error("Our AI service is temporarily unavailable. Please try again in a minute.")
+            except Exception as exc:
+                log_event(f"{request_id}: unexpected error ({type(exc).__name__})")
+                status.update(label="Generation failed", state="error")
+                st.error("Something went wrong while generating your application. Please try again.")
 
-        coffee_placeholder.empty()
+        if result is not None:
+            increment_counter()
+            st.session_state.generation_count += 1
 
-        st.success(f"Done! (took {result['execution_time']}s)")
-        increment_counter()
-        st.session_state.generation_count += 1
-
-        # Store the final resume in session state so Apply-fix buttons can edit it
-        # and have the edits persist across reruns.
-        st.session_state.editable_resume = result["workflow"]["human_optimizer"]["human_friendly_resume"]
-        st.session_state.cover_letter = result["workflow"]["cover_letter"]["cover_letter"]
-        st.session_state.last_result = result
-        st.session_state.last_full_name = full_name
+            # Store the final resume in session state so Apply-fix buttons can edit it
+            # and have the edits persist across reruns.
+            st.session_state.editable_resume = result["workflow"]["human_optimizer"]["human_friendly_resume"]
+            st.session_state.cover_letter = result["workflow"]["cover_letter"]["cover_letter"]
+            st.session_state.last_result = result
+            st.session_state.last_full_name = full_name
 
 # ------------------------------------------------------------------
-# Display results (persists across reruns via session_state, so Apply buttons work)
+# Results (persist across reruns via session_state, so Apply buttons work)
 # ------------------------------------------------------------------
 if "last_result" in st.session_state:
     result = st.session_state.last_result
+    workflow = result["workflow"]
     full_name = st.session_state.last_full_name
     cover_letter = st.session_state.cover_letter
+    stem = file_stem(full_name)
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["✅ Final Resume", "✉️ Cover Letter", "📝 First Draft", "📊 ATS Score", "🔍 Reviewer Notes"]
+    ats_data = workflow["ats_optimization"]
+    completeness = workflow.get("completeness_check", {})
+    suggestions = workflow["reviewer"].get("suggestions", [])
+    analyzer = workflow.get("analyzer", {}) if isinstance(workflow.get("analyzer"), dict) else {}
+
+    st.write("")
+    st.markdown(f'<div class="cf-section-title">Your results</div>'
+                f'<div class="cf-section-sub">Generated in {result["execution_time"]} seconds.</div>',
+                unsafe_allow_html=True)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("ATS match", f"{ats_data.get('ats_score', 0)}/100", border=True)
+    m2.metric("Experience preserved", f"{completeness.get('completeness_pct', 100)}%", border=True)
+    m3.metric("Review suggestions", len(suggestions), border=True)
+    m4.metric("Candidate level", analyzer.get("candidate_level") or "—", border=True)
+
+    tab_resume, tab_letter, tab_ats, tab_review, tab_draft = st.tabs(
+        ["Tailored resume", "Cover letter", "ATS analysis", "Review suggestions", "First draft"]
     )
 
-    with tab1:
-        completeness = result["workflow"].get("completeness_check", {})
+    with tab_resume:
         if completeness.get("possibly_missing"):
-            with st.container(border=True):
-                st.warning(
-                    f"⚠️ Content check: {completeness['completeness_pct']}% of detected resume entries "
-                    "appear to be present. The following original line(s) weren't found in the final "
-                    "version — please double-check nothing important was dropped:"
-                )
-                for line in completeness["possibly_missing"]:
-                    st.caption(f"• {line}")
+            st.warning(
+                f"Content check: {completeness['completeness_pct']}% of the entries we detected in your original "
+                "resume appear in this version. Please double-check these lines weren't dropped:"
+            )
+            for line in completeness["possibly_missing"]:
+                st.caption(f"• {line}")
 
-        st.write(st.session_state.editable_resume)
-        dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
-        with dl_col1:
+        doc_col, action_col = st.columns([3, 1], gap="large")
+        with doc_col:
+            st.markdown(resume_to_html(st.session_state.editable_resume), unsafe_allow_html=True)
+        with action_col:
+            st.markdown('<div class="cf-card-title">Download</div>', unsafe_allow_html=True)
             st.download_button(
-                "⬇️ TXT",
-                data=st.session_state.editable_resume,
-                file_name=f"{full_name.replace(' ', '_')}_resume.txt",
-                mime="text/plain",
-                use_container_width=True,
+                "PDF", data=build_resume_pdf(st.session_state.editable_resume),
+                file_name=f"{stem}_Resume.pdf", mime="application/pdf", type="primary", width="stretch",
             )
-        with dl_col2:
             st.download_button(
-                "⬇️ DOCX",
-                data=build_docx_bytes(st.session_state.editable_resume),
-                file_name=f"{full_name.replace(' ', '_')}_resume.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
+                "Word (DOCX)", data=build_resume_docx(st.session_state.editable_resume),
+                file_name=f"{stem}_Resume.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", width="stretch",
             )
-        with dl_col3:
             st.download_button(
-                "⬇️ PDF",
-                data=build_pdf_bytes(st.session_state.editable_resume),
-                file_name=f"{full_name.replace(' ', '_')}_resume.pdf",
-                mime="application/pdf",
-                use_container_width=True,
+                "Plain text", data=st.session_state.editable_resume,
+                file_name=f"{stem}_Resume.txt", mime="text/plain", width="stretch",
             )
-        with dl_col4:
-            if st.button("↩️ Reset edits", use_container_width=True):
-                st.session_state.editable_resume = result["workflow"]["human_optimizer"]["human_friendly_resume"]
+            st.divider()
+            st.caption("Apply fixes from the Review suggestions tab to update this resume.")
+            if st.button("Reset edits", width="stretch"):
+                st.session_state.editable_resume = workflow["human_optimizer"]["human_friendly_resume"]
                 st.rerun()
 
-    with tab2:
-        st.write(cover_letter)
-        dl_col1, dl_col2, dl_col3 = st.columns(3)
-        with dl_col1:
+    with tab_letter:
+        doc_col, action_col = st.columns([3, 1], gap="large")
+        with doc_col:
+            st.markdown(letter_to_html(cover_letter), unsafe_allow_html=True)
+        with action_col:
+            st.markdown('<div class="cf-card-title">Download</div>', unsafe_allow_html=True)
             st.download_button(
-                "⬇️ TXT",
-                data=cover_letter,
-                file_name=f"{full_name.replace(' ', '_')}_cover_letter.txt",
-                mime="text/plain",
-                use_container_width=True,
+                "PDF", data=build_letter_pdf(cover_letter, full_name),
+                file_name=f"{stem}_Cover_Letter.pdf", mime="application/pdf", type="primary", width="stretch",
             )
-        with dl_col2:
             st.download_button(
-                "⬇️ DOCX",
-                data=build_docx_bytes(cover_letter),
-                file_name=f"{full_name.replace(' ', '_')}_cover_letter.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
+                "Word (DOCX)", data=build_letter_docx(cover_letter, full_name),
+                file_name=f"{stem}_Cover_Letter.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", width="stretch",
             )
-        with dl_col3:
             st.download_button(
-                "⬇️ PDF",
-                data=build_pdf_bytes(cover_letter),
-                file_name=f"{full_name.replace(' ', '_')}_cover_letter.pdf",
-                mime="application/pdf",
-                use_container_width=True,
+                "Plain text", data=cover_letter,
+                file_name=f"{stem}_Cover_Letter.txt", mime="text/plain", width="stretch",
             )
 
-    with tab3:
-        st.write(result["workflow"]["resume_writer"]["generated_resume"])
-
-    with tab4:
-        ats_data = result["workflow"]["ats_optimization"]
+    with tab_ats:
         score = ats_data.get("ats_score", 0)
-        st.metric("ATS Match Score", f"{score}/100")
-        st.progress(score / 100)
+        score_col, detail_col = st.columns([1, 2], gap="large")
+        with score_col:
+            with st.container(border=True):
+                st.metric("ATS match score", f"{score}/100")
+                st.progress(score / 100)
+                if ats_data.get("semantic_score") is not None:
+                    st.caption(f"Keyword match {ats_data.get('keyword_score')} · Semantic match {ats_data['semantic_score']}")
+                else:
+                    st.caption("Keyword match only. Add a job description for semantic matching.")
+        with detail_col:
+            explanation = ats_data.get("explanation", "")
+            missing_keywords = ats_data.get("missing_keywords", [])
+            if explanation:
+                st.markdown(f"**Why this score**\n\n{explanation}")
+            if missing_keywords:
+                chips = "".join(f'<span class="cf-chip">{html.escape(str(kw))}</span>' for kw in missing_keywords)
+                st.markdown("**Missing or under-represented skills**")
+                st.markdown(f'<div class="cf-chips">{chips}</div>', unsafe_allow_html=True)
+            with st.expander("Raw agent output"):
+                st.code(ats_data.get("llm_feedback", ""), language=None)
 
-        explanation = ats_data.get("explanation", "")
-        missing_keywords = ats_data.get("missing_keywords", [])
-
-        if explanation:
-            st.info(f"**Why this score?** {explanation}")
-
-        if missing_keywords:
-            st.write("**Missing or under-represented from the job description:**")
-            for kw in missing_keywords:
-                st.markdown(f"- {kw}")
-
-        with st.expander("Raw agent output"):
-            st.write(ats_data.get("llm_feedback", ""))
-
-    with tab5:
-        suggestions = result["workflow"]["reviewer"].get("suggestions", [])
+    with tab_review:
         if not suggestions:
-            st.write(result["workflow"]["reviewer"].get("review_feedback", "No issues found."))
+            st.success("No issues found. Your resume reads cleanly.")
         else:
-            st.caption("Click Apply to instantly update the Final Resume tab with a fix.")
+            st.caption("Click Apply to update your tailored resume with a fix.")
             for i, sug in enumerate(suggestions):
                 issue = sug.get("issue", "Suggestion")
                 current_text = sug.get("current_text", "")
@@ -482,29 +444,40 @@ if "last_result" in st.session_state:
                     col_a, col_b, col_c = st.columns([2, 2, 1])
                     with col_a:
                         st.caption("Current")
-                        st.code(current_text, language=None)
+                        st.code(current_text, language=None, wrap_lines=True)
                     with col_b:
                         st.caption("Suggested")
-                        st.code(suggested_fix, language=None)
+                        st.code(suggested_fix, language=None, wrap_lines=True)
                     with col_c:
                         st.write("")
                         already_applied = current_text and current_text not in st.session_state.editable_resume
                         if already_applied:
                             st.success("Applied")
-                        elif st.button("Apply", key=f"apply_{i}", use_container_width=True):
+                        elif st.button("Apply", key=f"apply_{i}", width="stretch"):
                             if current_text and current_text in st.session_state.editable_resume:
                                 st.session_state.editable_resume = st.session_state.editable_resume.replace(
                                     current_text, suggested_fix, 1
                                 )
                                 st.rerun()
                             else:
-                                st.warning("Couldn't find an exact match to auto-apply — edit manually.")
+                                st.warning("Couldn't find an exact match to apply automatically. Edit it manually.")
+
+    with tab_draft:
+        st.caption("The Resume Writer's first draft, before the Human Optimizer polished it.")
+        st.markdown(resume_to_html(workflow["resume_writer"]["generated_resume"]), unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# Feedback footer
+# How it works + footer
 # ------------------------------------------------------------------
-st.divider()
-st.markdown(
-    "### Found this useful? \n"
-    "[⭐ Leave a quick review here](PASTE_YOUR_GOOGLE_FORM_LINK_HERE) — it takes 30 seconds and helps a lot!"
-)
+st.write("")
+with st.expander(f"How {APP_NAME} works — a {len(PIPELINE_STEPS)}-step AI pipeline"):
+    st.markdown("\n".join(
+        f"{i}. **{name}** — {description}" for i, (name, description) in enumerate(PIPELINE_STEPS, start=1)
+    ))
+
+st.markdown(f"""
+<div class="cf-footer">
+  <div>&copy; {date.today().year} {APP_NAME}. Built by Madhav G.</div>
+  <div>Your data is processed only to generate your results and is never stored.</div>
+</div>
+""", unsafe_allow_html=True)

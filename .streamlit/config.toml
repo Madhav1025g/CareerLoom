@@ -1,0 +1,16 @@
+[theme]
+base = "light"
+primaryColor = "#1E3A8A"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6FA"
+textColor = "#111827"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+baseRadius = "medium"
+borderColor = "#E3E7EF"
+showWidgetBorder = true
+
+[client]
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
