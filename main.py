@@ -21,7 +21,7 @@ except ImportError:
 # APP Initialization
 #----------------------
 
-APP_NAME = "CareerForge"
+APP_NAME = "CareerLoom"
 
 app = FastAPI(
     title=f"{APP_NAME} API",
@@ -119,7 +119,7 @@ class ResumeRequest(BaseModel):
 
 # Logs go to stdout only (visible to the app owner in the hosting dashboard) — never to a file,
 # and never into API responses. Do NOT pass resume text, prompts, LLM output, or keys to log_event.
-logger = logging.getLogger("careerforge")
+logger = logging.getLogger("careerloom")
 if not logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S"))

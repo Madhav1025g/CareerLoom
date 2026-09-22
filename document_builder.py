@@ -8,7 +8,7 @@ import html
 import io
 import re
 
-ACCENT_RGB = (30, 58, 138)     # CareerForge navy
+ACCENT_RGB = (30, 58, 138)     # CareerLoom navy
 MUTED_RGB = (100, 110, 125)
 TEXT_RGB = (17, 24, 39)
 
@@ -87,13 +87,13 @@ def resume_to_html(text: str) -> str:
             in_list = False
         safe = html.escape(value)
         if kind == "name":
-            parts.append(f'<div class="cf-name">{safe}</div>')
+            parts.append(f'<div class="cl-name">{safe}</div>')
         elif kind == "contact":
-            parts.append(f'<div class="cf-contact">{safe}</div>')
+            parts.append(f'<div class="cl-contact">{safe}</div>')
         elif kind == "heading":
-            parts.append(f'<div class="cf-heading">{safe}</div>')
+            parts.append(f'<div class="cl-heading">{safe}</div>')
         elif kind == "entry":
-            parts.append(f'<div class="cf-entry">{safe}</div>')
+            parts.append(f'<div class="cl-entry">{safe}</div>')
         elif kind == "bullet":
             if not in_list:
                 parts.append("<ul>")
@@ -106,14 +106,14 @@ def resume_to_html(text: str) -> str:
             parts.append(f"<p>{safe}</p>")
     if in_list:
         parts.append("</ul>")
-    return '<div class="cf-doc">' + "".join(parts) + "</div>"
+    return '<div class="cl-doc">' + "".join(parts) + "</div>"
 
 
 def letter_to_html(text: str) -> str:
     paragraphs = "".join(
         "<p>" + html.escape(p).replace("\n", "<br>") + "</p>" for p in parse_letter(text)
     )
-    return f'<div class="cf-doc cf-letter">{paragraphs}</div>'
+    return f'<div class="cl-doc cl-letter">{paragraphs}</div>'
 
 # ------------------------------------------------------------------
 # PDF (fpdf2, core Helvetica font)
