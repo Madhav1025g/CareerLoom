@@ -74,8 +74,9 @@ def fake_llm(prompt: str) -> str:
     """Route each agent's prompt to a canned response."""
     if "candidate_level" in prompt:
         return '```json\n{"candidate_level": "Mid-Level", "primary_domain": "Backend", "years_experience": 5}\n```'
-    if "missing_keywords" in prompt:
-        return 'Sure! {"missing_keywords": ["Kubernetes"], "explanation": "Kubernetes is not mentioned."}'
+    if '"job_keywords"' in prompt:
+        return ('Sure! {"job_keywords": ["Python", "FastAPI", "AWS", "Docker", "Kubernetes", "Python"], '
+                '"explanation": "Kubernetes is not mentioned."}')
     if "JSON array" in prompt:
         return ('[{"issue": "Grammar", "current_text": "Developed internal dashboards in React", '
                 '"suggested_fix": "Developed internal analytics dashboards in React"},'

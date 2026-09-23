@@ -197,7 +197,7 @@ def test_ats_gap_analysis_runs_before_writer(pipeline, monkeypatch):
     order = []
 
     def llm(prompt):
-        if "missing_keywords" in prompt:
+        if '"job_keywords"' in prompt:
             order.append("ats")
         elif "Generate a professional ATS-friendly resume" in prompt:
             order.append("writer")
@@ -232,4 +232,68 @@ def test_lower_scoring_polish_falls_back_to_draft(pipeline, monkeypatch):
     assert wf["human_optimizer"]["fallback_reason"] == "lower ATS score"
     assert wf["human_optimizer"]["human_friendly_resume"] == TAILORED_RESUME
     ats = wf["ats_optimization"]
-    assert ats["after"]["ats_score"] == main.ats_breakdown(TAILORED_RESUME, REQUEST["job_description"], REQUEST["skills"])["overall"]
+    expected = main.ats_breakdown(TAILORED_RESUME, REQUEST["job_description"], REQUEST["skills"], ats["job_keywords"])
+    assert ats["after"]["ats_score"] == expected["overall"]
+
+
+# ---------------------------------------------------------------- job keyword coverage scoring
+
+@pytest.mark.parametrize("text, term, expected", [
+    ("Built services in JavaScript", "Java", False),
+    ("Java and Spring", "java", True),
+    ("Designed REST APIs", "REST API", True),
+    ("Owned the REST API", "REST APIs", True),
+    ("CI/CD pipelines with GitHub Actions", "CI/CD", True),
+    ("Deployed on AWS Lambda", "AWS", True),
+    ("Worked with Kubernetes", "Terraform", False),
+    ("", "Python", False),
+])
+def test_contains_term(text, term, expected):
+    assert main.contains_term(text, term) is expected
+
+
+def test_keyword_coverage():
+    result = main.keyword_coverage("Python and AWS", ["Python", "AWS", "Docker", "Kubernetes"])
+    assert result == {"score": 50, "covered": ["Python", "AWS"], "missing": ["Docker", "Kubernetes"]}
+    assert main.keyword_coverage("anything", [])["score"] is None
+
+
+def test_ats_agent_extracts_deduplicated_job_keywords(pipeline):
+    ats = main.ats_agent(dict(REQUEST))
+    assert ats["job_keywords"] == ["Python", "FastAPI", "AWS", "Docker", "Kubernetes"]
+    assert ats["covered_keywords"] == ["Python", "FastAPI", "AWS", "Docker"]
+    assert ats["missing_keywords"] == ["Kubernetes"]
+    assert ats["keyword_score"] == 80
+
+
+def test_writer_must_keep_existing_job_keywords(pipeline, monkeypatch):
+    prompts = {}
+
+    def llm(prompt):
+        if "Generate a professional ATS-friendly resume" in prompt:
+            prompts["writer"] = prompt
+        return fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    pipeline.orchestrator(dict(REQUEST), "req-keep")
+    assert "ALREADY contains — every one MUST appear, spelled exactly like this: Python, FastAPI, AWS, Docker" in prompts["writer"]
+
+
+def test_tailoring_never_scores_below_original_when_keywords_kept(pipeline):
+    ats = pipeline.orchestrator(dict(REQUEST), "req-up")["workflow"]["ats_optimization"]
+    assert ats["after"]["keyword_score"] >= ats["before"]["keyword_score"]
+    assert ats["lost_keywords"] == []
+    assert ats["still_missing"] == ["Kubernetes"]
+
+
+def test_lost_keywords_are_reported(pipeline, monkeypatch):
+    no_docker = TAILORED_RESUME.replace("Docker", "containers")
+
+    def llm(prompt):
+        if "Generate a professional ATS-friendly resume" in prompt or "Human sounding" in prompt:
+            return no_docker
+        return fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    ats = pipeline.orchestrator(dict(REQUEST), "req-lost")["workflow"]["ats_optimization"]
+    assert ats["lost_keywords"] == ["Docker"]

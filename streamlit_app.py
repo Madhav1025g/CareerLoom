@@ -91,6 +91,7 @@ header[data-testid="stHeader"] { background: transparent; }
 .cl-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 1rem 0; }
 .cl-chip { font-size: 0.8rem; font-weight: 500; color: #9A3412; background: #FFF7ED; border: 1px solid #FED7AA;
            border-radius: 999px; padding: 0.2rem 0.65rem; }
+.cl-chip-good { color: #166534; background: #F0FDF4; border-color: #BBF7D0; }
 
 .cl-footer { border-top: 1px solid #E3E7EF; margin-top: 3rem; padding-top: 1.2rem; color: #94A3B8; font-size: 0.82rem;
              display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
@@ -563,21 +564,41 @@ if "last_result" in st.session_state and "docs" in st.session_state:
         overall_note = "about the same overall" if not meaningful else f"{change:+d} points overall"
         st.markdown(f"**ATS score: original vs. tailored resume** &nbsp;·&nbsp; {overall_note}")
         st.altair_chart(chart, width="stretch")
-        st.caption("Both versions are scored the same way. Keyword match uses the skills you entered; "
-                   "semantic match compares your resume to the job description.")
+        if ats_data.get("job_keywords"):
+            st.caption("Both versions are scored against the same list of the job's key terms. Keyword match is the "
+                       "share of those terms found in your resume (60% of the score); semantic match measures how "
+                       "closely your wording matches the job description (40%).")
+        else:
+            st.caption("Both versions are scored the same way. Without a job description, keyword match uses the "
+                       "skills you entered.")
         with st.expander("View as table"):
             st.dataframe(table, hide_index=True, width="stretch")
 
         st.write("")
+        def chips(keywords, extra_class=""):
+            items = "".join(f'<span class="cl-chip {extra_class}">{html.escape(str(k))}</span>' for k in keywords)
+            st.markdown(f'<div class="cl-chips">{items}</div>', unsafe_allow_html=True)
+
+        job_keywords = ats_data.get("job_keywords", [])
+        if job_keywords:
+            covered_after = len(job_keywords) - len(ats_data.get("still_missing", []))
+            st.markdown(f"**Job keyword coverage:** {covered_after} of {len(job_keywords)} key terms "
+                        f"(original resume: {len(ats_data.get('covered_keywords', []))})")
+        if ats_data.get("lost_keywords"):
+            st.warning("These job keywords were in your original resume but not in the tailored version. "
+                       "Add them back using Edit on the Tailored resume tab: " + ", ".join(ats_data["lost_keywords"]))
+        if ats_data.get("added_keywords"):
+            st.markdown("**Now included after tailoring**")
+            chips(ats_data["added_keywords"], "cl-chip-good")
         explanation = ats_data.get("explanation", "")
-        missing_keywords = ats_data.get("missing_keywords", [])
         if explanation:
             st.markdown(f"**What held your original score back**\n\n{explanation}")
-        if missing_keywords:
-            chips = "".join(f'<span class="cl-chip">{html.escape(str(kw))}</span>' for kw in missing_keywords)
-            st.markdown("**Missing or under-represented skills**")
-            st.markdown(f'<div class="cl-chips">{chips}</div>', unsafe_allow_html=True)
-            st.caption("Only add these to your resume if you genuinely have the experience.")
+        still_missing = ats_data.get("still_missing", ats_data.get("missing_keywords", []))
+        if still_missing:
+            st.markdown("**Still missing**")
+            chips(still_missing)
+            st.caption("CareerLoom never adds skills your resume doesn't show. If you genuinely have one of these, "
+                       "add it with Edit on the Tailored resume tab.")
         with st.expander("Raw agent output"):
             st.code(ats_data.get("llm_feedback", ""), language=None)
 

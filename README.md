@@ -32,6 +32,8 @@ An 8-step multi-agent pipeline. Independent agents run in parallel to cut genera
 
 Job-description matching uses a **RAG pipeline** (Sentence-Transformers embeddings + Qdrant vector search).
 
+**How the ATS score works:** the job's 10–20 key terms are extracted once, and both the original and the tailored resume are scored against that same list: 60% keyword coverage (whole-term matching) + 40% semantic similarity to the job description. Changes of ±2 points are shown as "about the same".
+
 ## Privacy
 
 - Resume content is sent to the LLM provider only to generate results.

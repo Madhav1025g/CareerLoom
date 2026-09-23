@@ -438,70 +438,111 @@ def calculate_ats_score(resume_text: str, skills: list[str]) -> int:
     return max(0, min(score, 100))
 
 
-def ats_breakdown(resume_text: str, job_description: str | None, skills: list[str]) -> dict:
+def contains_term(text: str, term: str) -> bool:
+    """
+    Whole-term, case-insensitive match: "Java" does not match inside "JavaScript", while
+    "REST API" matches "REST APIs" and "CI/CD" matches "CI/CD pipelines".
+    """
+    term = (term or "").strip().lower()
+    if not term or not text:
+        return False
+    variants = {term, term[:-1] if term.endswith("s") else term + "s"}
+    lower = text.lower()
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(v) + r"(?![a-z0-9])", lower) for v in variants if v)
+
+
+def keyword_coverage(resume_text: str, job_keywords: list[str]) -> dict:
+    """Which of the job's key terms appear in the resume — what real ATS systems mostly check."""
+    covered = [k for k in job_keywords if contains_term(resume_text, k)]
+    missing = [k for k in job_keywords if k not in covered]
+    score = round(100 * len(covered) / len(job_keywords)) if job_keywords else None
+    return {"score": score, "covered": covered, "missing": missing}
+
+
+# Real ATS systems are keyword-driven, so keyword coverage carries more weight than semantic similarity
+# (which also moves a few points from wording alone).
+KEYWORD_WEIGHT = 0.6
+
+
+def ats_breakdown(resume_text: str, job_description: str | None, skills: list[str],
+                  job_keywords: list[str] | None = None) -> dict:
     """
     Score any resume text the same way, so the original and tailored versions are comparable.
-    Blends keyword matching (literal, generous) with semantic similarity (conservative by nature —
-    using it alone makes even great resumes look artificially low).
+    Keyword score = coverage of the job's key terms (falls back to the candidate's stated skills
+    when no job keywords are available); semantic score = embedding similarity to the job description.
     """
-    keyword_score = calculate_ats_score(resume_text, skills)
+    coverage = keyword_coverage(resume_text, job_keywords or [])
+    keyword_score = coverage["score"] if coverage["score"] is not None else calculate_ats_score(resume_text, skills)
     semantic_score = semantic_ats_score(job_description, chunk_resume(resume_text))
-    overall = round((keyword_score + semantic_score) / 2) if semantic_score is not None else keyword_score
-    return {"overall": overall, "keyword": keyword_score, "semantic": semantic_score}
+    if semantic_score is None:
+        overall = keyword_score
+    else:
+        overall = round(KEYWORD_WEIGHT * keyword_score + (1 - KEYWORD_WEIGHT) * semantic_score)
+    return {"overall": overall, "keyword": keyword_score, "semantic": semantic_score,
+            "covered": coverage["covered"], "missing": coverage["missing"]}
 
 #------------------------
 # ATS OPTIMIZATION AGENT (RAG-aware)
 #------------------------
 
 def ats_agent(user_request, matched_chunks=None):
+    """
+    Extracts the job's key terms ONCE, so the original and tailored resumes are scored against the
+    same list. Which terms are covered or missing is then computed deterministically, not guessed.
+    """
 
     log_event("ATS Agent Started")
 
-    scores = ats_breakdown(user_request.get("resume_text") or "", user_request.get("job_description"), user_request["skills"])
-    keyword_score, semantic_score, final_score = scores["keyword"], scores["semantic"], scores["overall"]
+    resume_text = user_request.get("resume_text") or ""
+    job_description = (user_request.get("job_description") or "").strip()
 
-    relevant_context = "\n".join(matched_chunks) if matched_chunks else user_request.get("resume_text", "")
-    job_description = user_request.get("job_description")
+    if job_description:
+        task = f"""
+    1. "job_keywords": the 10-20 most important hard requirements in the job description below — skills, tools,
+       technologies, platforms, methodologies, certifications, and domain terms. Copy each term exactly as the
+       job description writes it, keep each to 1-4 words, and exclude soft skills (e.g. "team player").
+    2. "explanation": one or two plain-English sentences on the main gaps between the resume and the job,
+       naming specific missing tools/skills. If nothing significant is missing, say the resume covers the job well.
 
-    jd_section = (
-        f"Job description to compare against:\n{job_description}"
-        if job_description
-        else "No job description was provided — just flag any obviously missing common skills relative to the candidate's stated skills list."
-    )
+    Job description:
+    {job_description[:JD_PROMPT_CHARS]}
+    """
+    else:
+        task = """
+    No job description was provided. Return "job_keywords": [] and an "explanation" naming any obviously
+    missing common skills relative to the candidate's stated skills and role.
+    """
 
     prompt = f"""
-    Compare this resume content against the job description below (if provided) to identify
-    specific tools, technologies, or experience the job asks for that are missing or barely
-    represented in the resume.
+    You are an ATS (applicant tracking system) analyst. Produce:
+    {task}
+    Candidate's full resume:
+    {resume_text}
 
-    Resume content (most relevant excerpts):
-    {relevant_context}
-
-    Candidate's stated skills:
-    {', '.join(user_request['skills'])}
-
-    {jd_section}
+    Candidate's stated skills: {', '.join(user_request['skills'])}
 
     Return ONLY JSON (no prose, no markdown fences):
-    {{
-      "missing_keywords": [],
-      "explanation": "one or two plain-English sentences explaining the main gaps holding the score back — name the specific missing tools/skills/experience. If nothing significant is missing, say the resume covers the job well."
-    }}
+    {{"job_keywords": [], "explanation": ""}}
     """
 
     output = call_llm(prompt)
     parsed = parse_json_object(output)
-    missing_keywords = parsed.get("missing_keywords", []) if isinstance(parsed.get("missing_keywords"), list) else []
+    raw_keywords = parsed.get("job_keywords") if isinstance(parsed.get("job_keywords"), list) else []
+    job_keywords = list(dict.fromkeys(str(k).strip() for k in raw_keywords if str(k).strip()))[:20]
     explanation = parsed.get("explanation", "")
 
-    log_event(f"ATS completed | keyword_score={keyword_score} semantic_score={semantic_score} final={final_score}")
+    scores = ats_breakdown(resume_text, job_description or None, user_request["skills"], job_keywords)
+    log_event(f"ATS completed | keywords={len(job_keywords)} keyword_score={scores['keyword']} "
+              f"semantic_score={scores['semantic']} final={scores['overall']}")
 
     return {
         "llm_feedback": output,
-        "ats_score": final_score,
-        "keyword_score": keyword_score,
-        "semantic_score": semantic_score,
-        "missing_keywords": missing_keywords,
+        "ats_score": scores["overall"],
+        "keyword_score": scores["keyword"],
+        "semantic_score": scores["semantic"],
+        "job_keywords": job_keywords,
+        "covered_keywords": scores["covered"],
+        "missing_keywords": scores["missing"],
         "explanation": explanation,
     }
 
@@ -553,7 +594,7 @@ def is_usable_resume(text: str, source_text: str | None) -> bool:
 JD_PROMPT_CHARS = 4000  # keeps prompts within Groq's free-tier tokens-per-minute limit
 
 
-def tailoring_section(user_request, missing_keywords=None) -> str:
+def tailoring_section(user_request, missing_keywords=None, covered_keywords=None) -> str:
     """Job-targeting instructions shared by the writer and optimizer, with strict no-fabrication rules."""
     job_description = (user_request.get("job_description") or "").strip()
     if not job_description:
@@ -561,24 +602,26 @@ def tailoring_section(user_request, missing_keywords=None) -> str:
     No job description was given — tailor the resume to a {user_request['current_role'] or 'role matching the candidate'} position.
     """
     gaps = ", ".join(map(str, missing_keywords or [])) or "none identified"
+    keep = ", ".join(map(str, covered_keywords or [])) or "none identified"
     return f"""
     TARGET JOB DESCRIPTION (tailor the resume to THIS role):
     {job_description[:JD_PROMPT_CHARS]}
 
-    Skills/keywords this job asks for that the original resume under-represents: {gaps}
+    Job keywords the original resume ALREADY contains — every one MUST appear, spelled exactly like this: {keep}
+    Job keywords the original resume is missing: {gaps}
 
     Tailoring rules:
     - Open the PROFESSIONAL SUMMARY with the target role's title and the candidate's strengths most relevant to it.
     - Mirror the job description's exact terminology wherever the candidate's real experience matches
       (e.g. if the job says "CI/CD" and the resume says "automated deployments", write "CI/CD (automated deployments)").
     - Within each job, put the most job-relevant bullets first. Order skill categories by relevance to the job.
-    - For each under-represented keyword: include it ONLY if the source resume shows the candidate genuinely has
+    - For each missing keyword: include it ONLY if the source resume shows the candidate genuinely has
       that experience, possibly under different wording. NEVER add a skill, tool, certification, employer, title,
       or metric that the source resume does not support. Honesty matters more than the score.
     """
 
 
-def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None):
+def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None, covered_keywords=None):
 
     log_event("Resume Writer Agent Started")
 
@@ -610,7 +653,7 @@ def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None
     Full source resume content (this is the complete and only source of truth — use ALL of it):
     {full_resume_text}
     {emphasis_section}
-    {tailoring_section(user_request, missing_keywords)}
+    {tailoring_section(user_request, missing_keywords, covered_keywords)}
     {RESUME_FORMAT_RULES}
     - CRITICAL: Include every distinct job, company, and project mentioned in the full source content above,
       with their real company names and dates exactly as given. NEVER write placeholders like "[Not Provided]"
@@ -638,7 +681,7 @@ def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None
 # HUMAN OPTIMIZER AGENT
 #----------------------
 
-def human_optimizer_agent(user_request, resume_text):
+def human_optimizer_agent(user_request, resume_text, keep_keywords=None):
 
     log_event("Human Optimizer Agent Started")
 
@@ -656,7 +699,7 @@ def human_optimizer_agent(user_request, resume_text):
     This resume has been tailored to the job below. Keep that tailoring: preserve every job-description
     keyword and specific technical term — never swap them for generic synonyms — and keep the most
     job-relevant bullets first. Improve the wording only.
-    {tailoring_section(user_request)}
+    {tailoring_section(user_request, covered_keywords=keep_keywords)}
     {RESUME_FORMAT_RULES}
     - CRITICAL: Preserve every distinct job, company, and project entry from the resume below.
       Do not drop, merge, or summarize away any entry while rewriting — the output must contain
@@ -861,11 +904,14 @@ def orchestrator(user_request, request_id, progress_callback=None):
         notify("Writing your tailored resume...")
         resume_writer_output = resume_writer_agent(
             user_request, matched_chunks=matched_chunks, missing_keywords=ats_output["missing_keywords"],
+            covered_keywords=ats_output["covered_keywords"],
         )
         draft_text = resume_writer_output["generated_resume"]
 
         notify("Polishing the final version...")
-        human_optimizer_output = human_optimizer_agent(user_request, draft_text)
+        # The optimizer must keep every job keyword the draft achieved, not just the original's.
+        draft_keywords = keyword_coverage(draft_text, ats_output["job_keywords"])["covered"]
+        human_optimizer_output = human_optimizer_agent(user_request, draft_text, keep_keywords=draft_keywords)
         polished_text = human_optimizer_output["human_friendly_resume"]
 
         notify("Checking content and picking the strongest version...")
@@ -873,8 +919,9 @@ def orchestrator(user_request, request_id, progress_callback=None):
         # and score at least as well against the job. Otherwise the draft is the better final resume.
         draft_completeness = check_completeness(resume_text, draft_text)
         polished_completeness = check_completeness(resume_text, polished_text)
-        draft_scores = ats_breakdown(draft_text, job_description, user_request["skills"])
-        polished_scores = ats_breakdown(polished_text, job_description, user_request["skills"])
+        job_keywords = ats_output["job_keywords"]
+        draft_scores = ats_breakdown(draft_text, job_description, user_request["skills"], job_keywords)
+        polished_scores = ats_breakdown(polished_text, job_description, user_request["skills"], job_keywords)
         if not is_usable_resume(polished_text, resume_text):
             fallback_reason = "unusable output"
         elif polished_completeness["completeness_pct"] < draft_completeness["completeness_pct"]:
@@ -901,6 +948,11 @@ def orchestrator(user_request, request_id, progress_callback=None):
 
         ats_output["before"] = {k: ats_output[k] for k in ("ats_score", "keyword_score", "semantic_score")}
         ats_output["after"] = {"ats_score": after["overall"], "keyword_score": after["keyword"], "semantic_score": after["semantic"]}
+        ats_output["added_keywords"] = [k for k in after["covered"] if k not in ats_output["covered_keywords"]]
+        ats_output["still_missing"] = after["missing"]
+        ats_output["lost_keywords"] = [k for k in ats_output["covered_keywords"] if k not in after["covered"]]
+        if ats_output["lost_keywords"]:
+            log_event(f"{request_id}: WARNING — tailoring lost {len(ats_output['lost_keywords'])} job keywords")
 
         notify("Finishing up...")
         analyzer_output = analyzer_future.result()
