@@ -151,7 +151,25 @@ class LLMUnavailableError(RuntimeError):
     """Raised when no LLM provider could produce a response."""
 
 
+class LLMBusyError(LLMUnavailableError):
+    """The AI provider's rate limit is used up (e.g. Groq's free tier). `daily` is True for per-day limits."""
+
+    def __init__(self, message, daily=False):
+        super().__init__(message)
+        self.daily = daily
+
+
+def _rate_limit_info(exc):
+    """Return (is_rate_limited, is_daily_limit) for a provider exception."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    limited = status == 429 or "rate limit" in text or "rate_limit" in text
+    daily = limited and ("per day" in text or "(tpd)" in text or "(rpd)" in text)
+    return limited, daily
+
+
 def call_llm(prompt):
+    rate_limit = None  # (daily,) when the last provider failure was a rate limit
     # Groq path (free) — used when LLM_PROVIDER=groq and a key is configured
     if LLM_PROVIDER == "groq" and groq_client is not None:
         try:
@@ -172,9 +190,14 @@ def call_llm(prompt):
                 return content
             log_event("Groq returned an empty response, falling back to OpenAI")
         except Exception as exc:
-            log_event(f"Groq call failed ({type(exc).__name__}), falling back to OpenAI")
+            limited, daily = _rate_limit_info(exc)
+            if limited:
+                rate_limit = daily
+            log_event(f"Groq call failed ({type(exc).__name__}{', daily limit' if daily else ''}), falling back to OpenAI")
 
     if client is None:
+        if rate_limit is not None:
+            raise LLMBusyError("The AI provider's rate limit is used up.", daily=rate_limit)
         raise LLMUnavailableError("No LLM provider is configured or available.")
 
     try:
@@ -192,6 +215,9 @@ def call_llm(prompt):
         content = (response.choices[0].message.content or "").strip()
     except Exception as exc:
         log_event(f"OpenAI call failed ({type(exc).__name__})")
+        limited, daily = _rate_limit_info(exc)
+        if limited or rate_limit is not None:
+            raise LLMBusyError("The AI provider's rate limit is used up.", daily=daily or bool(rate_limit)) from exc
         raise LLMUnavailableError("All LLM providers failed.") from exc
     if not content:
         raise LLMUnavailableError("The LLM returned an empty response.")
@@ -769,7 +795,14 @@ def reviewer_agent(resume_text):
 # COVER LETTER AGENT
 #----------------------
 
-def cover_letter_agent(user_request, matched_chunks=None):
+COVER_LETTER_TONES = {
+    "Formal": "Formal and polished, but warm — the tone of a strong professional application.",
+    "Friendly": "Warm, personable, and conversational while still professional — shows genuine enthusiasm.",
+    "Concise": "Direct and brief: at most 3 short paragraphs and about 180 words, no filler.",
+}
+
+
+def cover_letter_agent(user_request, matched_chunks=None, tone="Formal"):
 
     log_event("Cover Letter Agent Started")
 
@@ -794,6 +827,7 @@ def cover_letter_agent(user_request, matched_chunks=None):
 
     {jd_instruction}
 
+    Tone (takes priority over the length guidance above): {COVER_LETTER_TONES.get(tone, COVER_LETTER_TONES["Formal"])}
     Write in first person, professional but not stiff. If no company name is given, address it "Dear Hiring Manager,". Do not include placeholder brackets like [Company Name] unless a real company name was provided in the job description.
     Output plain text only (no Markdown). Start with the salutation and end with "Sincerely," followed by the candidate's name on the next line. Separate paragraphs with a blank line.
     """
@@ -850,6 +884,90 @@ def recruiter_snapshot_agent(user_request, final_resume_text):
     snapshot = call_llm(prompt)
     log_event("Recruiter snapshot generated")
     return {"snapshot": snapshot}
+
+#----------------------
+# INTERVIEW PREP AGENT (on demand)
+#----------------------
+
+def interview_prep_agent(user_request, final_resume_text):
+    """Likely interview questions for this job, each with a STAR answer drawn only from the resume."""
+
+    log_event("Interview Prep Agent Started")
+
+    job_description = (user_request.get("job_description") or "").strip()
+    target = (f"this job description:\n{job_description[:JD_PROMPT_CHARS]}" if job_description
+              else f"a {user_request['current_role'] or 'role matching their background'} role")
+
+    prompt = f"""
+    You are an experienced hiring manager preparing to interview this candidate for {target}
+
+    Candidate's resume (the ONLY source of facts about the candidate — never invent experience or numbers):
+    {final_resume_text}
+
+    Write 8 likely interview questions: about 3 behavioral, 3 technical/role-specific, and 2 about the
+    candidate's specific experience or gaps relative to the job. For each, give a suggested answer the
+    candidate could adapt, in STAR form (Situation, Task, Action, Result), using real details from the resume.
+    If the resume has no relevant example for a question, say so in the answer and suggest how to prepare.
+
+    Return ONLY a JSON array (no prose, no markdown fences), each item:
+    {{"category": "Behavioral" | "Technical" | "Experience", "question": "...",
+      "why_they_ask": "one sentence", "answer": {{"situation": "...", "task": "...", "action": "...", "result": "..."}}}}
+    """
+
+    raw = call_llm(prompt)
+    questions = [q for q in parse_json_list(raw) if isinstance(q, dict) and q.get("question")]
+    log_event(f"Interview prep generated ({len(questions)} questions)")
+    return {"questions": questions, "raw": raw}
+
+#----------------------
+# COMPARE JOBS (on demand)
+#----------------------
+
+def compare_jobs(resume_text, skills, job_descriptions, current_role=""):
+    """Score one resume against several job descriptions (same scoring as the main pipeline), best fit first."""
+    jobs = [(i, jd.strip()) for i, jd in enumerate(job_descriptions) if jd and jd.strip()]
+
+    def evaluate(item):
+        index, jd = item
+        request = {"resume_text": resume_text, "job_description": jd, "skills": skills, "current_role": current_role}
+        return {"index": index, "job_description": jd, **ats_agent(request)}
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(evaluate, jobs))
+    return sorted(results, key=lambda r: r["ats_score"], reverse=True)
+
+#----------------------
+# RESUME EDIT HELPERS
+#----------------------
+
+def add_skill_to_resume(resume_text: str, skill: str) -> str:
+    """
+    Add a skill the candidate confirmed they have to an "Additional Skills:" line in the skills section,
+    creating the line (or a SKILLS section) if needed. Headers follow RESUME_FORMAT_RULES (ALL CAPS lines).
+    """
+    skill = skill.strip()
+    lines = resume_text.rstrip("\n").split("\n")
+
+    def is_header(line):
+        stripped = line.strip().rstrip(":")
+        return bool(stripped) and stripped.upper() == stripped and any(c.isalpha() for c in stripped) and len(stripped) <= 45
+
+    for i, line in enumerate(lines):
+        if line.strip().lower().startswith("additional skills:"):
+            lines[i] = line.rstrip().rstrip(",") + f", {skill}"
+            return "\n".join(lines) + "\n"
+
+    skills_idx = next((i for i, l in enumerate(lines) if is_header(l) and "SKILL" in l.upper()), None)
+    if skills_idx is None:
+        return "\n".join(lines) + f"\n\nSKILLS\nAdditional Skills: {skill}\n"
+
+    end = skills_idx + 1
+    while end < len(lines) and not is_header(lines[end]):
+        end += 1
+    while end > skills_idx + 1 and not lines[end - 1].strip():
+        end -= 1
+    lines.insert(end, f"Additional Skills: {skill}")
+    return "\n".join(lines) + "\n"
 
 #----------------------
 # ORCHESTRATOR (RAG step, parallel agents, progress callback)
@@ -1000,6 +1118,9 @@ def generate_resume(request: ResumeRequest):
     # WORKFLOW EXECUTION
     try:
         return orchestrator(request.model_dump(), request_id)
+    except LLMBusyError as exc:
+        wait = "later today" if exc.daily else "in a few minutes"
+        raise HTTPException(status_code=429, detail=f"CareerLoom is busy right now. Please try again {wait}.")
     except LLMUnavailableError:
         raise HTTPException(status_code=503, detail="The AI service is temporarily unavailable. Please try again shortly.")
     except ResumeGenerationError:

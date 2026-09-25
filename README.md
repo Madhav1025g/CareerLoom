@@ -1,44 +1,85 @@
-# CareerLoom
+# CareerLoom: AI Multi-Agent Resume Tailoring Platform
 
-**AI career document platform: tailored resumes, cover letters, and ATS match scoring.**
+[![Tests](https://github.com/Madhav1025g/CareerLoom/actions/workflows/tests.yml/badge.svg)](https://github.com/Madhav1025g/CareerLoom/actions/workflows/tests.yml)
 
 **Live app:** https://careerloom.streamlit.app/
 
-CareerLoom reads your resume and a job description, then generates a tailored resume, a matching cover letter, and an ATS match score with a clear gap analysis, all in one pass.
+CareerLoom reads your resume and a job description, rewrites your resume for the role (using only experience you
+actually have), shows how much your ATS match improved, and adds a 15-second recruiter snapshot, a matching cover
+letter, and interview prep.
+
+![CareerLoom demo](docs/demo.gif)
+
+*Demo with the built-in example resume.*
 
 ## Features
 
-- Upload your resume (PDF, DOCX, or TXT) or paste it directly
-- Paste a job description for semantically matched, tailored output
-- **Truly job-tailored rewrite**: the writer targets the job description's requirements and wording, using only experience you actually have
-- **ATS score before vs. after** tailoring (bar chart beside your resume, detailed chart in the ATS tab), with missing skills and a plain-English explanation
-- Rewritten, ATS-friendly resume plus a matching cover letter
+**Tailor resume**
+- Upload a resume (PDF, DOCX, or TXT) or paste it, plus the job description
+- **Job-tailored rewrite** that mirrors the job's terminology and reorders by relevance, never inventing skills or experience
+- **ATS score before vs. after**, with job-keyword coverage, "now included" and "still missing" keywords
+- **Live re-scoring** as you edit, apply fixes, or click **"I have this"** on a missing skill
 - **Recruiter snapshot**: a half-page version a recruiter can scan in 10–15 seconds
-- Reviewer suggestions with one-click **Apply**, plus **in-page editing** of every document
-- **Four templates** (Professional, Modern, Classic, Compact) for **PDF** and **Word** exports, plus plain text
+- **Cover letter** in three tones (Formal, Friendly, Concise)
+- **Interview prep**: 8 likely questions for the job with STAR answers drawn from your resume
+- Reviewer suggestions with one-click **Apply**, and in-page editing of every document
+- **Four templates** (Professional, Modern, Classic, Compact) for **PDF** and **Word** exports
 
-## How it works
+**Compare jobs**: score one resume against up to three job descriptions, see the best fit first, and tailor for it in one click.
 
-An 8-step multi-agent pipeline. Independent agents run in parallel to cut generation time:
+**How we score** and **Privacy** pages explain the scoring formula and exactly what happens to user data.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U["Resume + job description"] --> UI["Streamlit UI<br/>(multi-page)"]
+    UI --> O["Orchestrator"]
+    O --> RAG["RAG matching<br/>embeddings + Qdrant<br/>(deleted after each request)"]
+    O --> ATS["ATS agent<br/>job keywords + gaps"]
+    O -. parallel .-> PA["Profile analyzer"]
+    O -. parallel .-> CL["Cover letter writer"]
+    RAG --> W["Resume writer<br/>targets the job, never invents"]
+    ATS --> W
+    W --> H["Human optimizer"]
+    H --> G{"Guardrails<br/>usable output · no dropped jobs<br/>· higher ATS score wins"}
+    G -. parallel .-> RV["Reviewer"]
+    G -. parallel .-> SN["Recruiter snapshot"]
+    G --> SC["ATS before/after scoring"]
+    RV --> UI
+    SN --> UI
+    SC --> UI
+    PA --> UI
+    CL --> UI
+```
+
+The 8-step pipeline:
 
 1. **Profile Analyzer**: determines experience level and domain
-2. **ATS Match**: scores the resume against the job using RAG-based semantic matching plus keyword matching
-3. **Resume Writer**: drafts a tailored resume using the full resume as the only source of truth
-4. **Human Optimizer**: polishes the draft so it reads naturally
-5. **Completeness Check**: a guardrail that flags dropped jobs and rejects broken AI output (falling back to the draft)
+2. **ATS Match**: extracts the job's key terms and finds the gaps (RAG semantic + keyword matching)
+3. **Resume Writer**: rewrites the resume for the job's requirements and wording, never inventing experience
+4. **Human Optimizer**: polishes the draft so it reads naturally while keeping every job keyword
+5. **Completeness Check**: flags dropped jobs, rejects broken AI output, and keeps the higher-scoring version
 6. **Reviewer**: checks grammar, formatting, and consistency, returning applicable fixes
 7. **Recruiter Snapshot**: condenses the resume into a 10–15 second, half-page summary
 8. **Cover Letter Writer**: drafts a matching cover letter
 
-Job-description matching uses a **RAG pipeline** (Sentence-Transformers embeddings + Qdrant vector search).
+Interview prep, cover-letter tone rewrites, and job comparison run **on demand**, keeping each generation within the
+free Groq tier. When the AI provider's rate limit is reached, users see a friendly "busy, try again later" message.
 
-**How the ATS score works:** the job's 10–20 key terms are extracted once, and both the original and the tailored resume are scored against that same list: 60% keyword coverage (whole-term matching) + 40% semantic similarity to the job description. Changes of ±2 points are shown as "about the same".
+## How the ATS score works
+
+The job's 10–20 key terms are extracted once, and both the original and tailored resumes are scored against that same
+list: **60% keyword coverage** (whole-term matching, so "Java" never matches "JavaScript") + **40% semantic similarity**
+to the job description. Changes of ±2 points are shown as "about the same". Details are on the in-app
+**How we score** page.
 
 ## Privacy
 
-- Resume content is sent to the LLM provider only to generate results.
+- Resume content is sent to the LLM provider (Groq, or OpenAI as a backup) only to generate results.
 - Resume chunks stored in Qdrant for matching are **deleted at the end of every request**.
-- Application logs contain only request IDs, pipeline steps, and scores. They never contain resume text, prompts, or API keys, and they are never written to files.
+- Logs contain only request IDs, pipeline steps, and scores: never resume text, prompts, or API keys.
+- Anonymous counts only (generations and helpful/not-helpful ratings) via counterapi.dev.
 
 ## Tech stack
 
@@ -46,28 +87,26 @@ Job-description matching uses a **RAG pipeline** (Sentence-Transformers embeddin
 |---|---|
 | Backend | Python, FastAPI, Pydantic |
 | AI / LLM | Groq (primary), OpenAI (fallback), Sentence-Transformers, Qdrant |
-| Frontend | Streamlit |
+| Frontend | Streamlit (multi-page), Altair charts |
 | Documents | pypdf, python-docx, fpdf2 |
+| Quality | pytest (97 tests), GitHub Actions CI |
 | Deployment | Streamlit Community Cloud |
 
 ## Project structure
 
 ```
-streamlit_app.py      # Web UI
-main.py               # Agents, orchestrator, RAG, and FastAPI endpoint
-document_builder.py   # Templates + formatting for preview, PDF, and DOCX
-tests/                # Automated tests (pytest)
-.streamlit/config.toml  # Theme
-assets/               # Favicon
-```
-
-## Tests
-
-The test suite runs offline with a fake LLM and embedding model (no API keys needed):
-
-```bash
-pip install -r requirements-dev.txt
-pytest
+streamlit_app.py        # Entry point: navigation, logo, footer
+app_pages/
+  tailor.py             # Main workflow: inputs, pipeline, results
+  compare.py            # Compare jobs
+  how_we_score.py       # Scoring explained
+  privacy.py            # Data handling
+ui_common.py            # Shared styles and helpers
+main.py                 # Agents, orchestrator, RAG, scoring, FastAPI endpoint
+document_builder.py     # Templates + formatting for preview, PDF, and DOCX
+tests/                  # pytest suite (runs offline with a fake LLM)
+.github/workflows/      # CI
+docs/demo.gif           # README demo
 ```
 
 ## Running locally
@@ -100,6 +139,15 @@ Or run the REST API (docs at http://127.0.0.1:8000/docs):
 
 ```bash
 uvicorn main:app --reload
+```
+
+## Tests
+
+The suite runs offline with a fake LLM and embedding model (no API keys needed), and runs automatically on every push:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## Author

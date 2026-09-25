@@ -1,2 +1,17 @@
--r requirements.txt
+# Test dependencies. Deliberately excludes sentence-transformers/torch: the tests use a fake
+# embedding model, so CI stays fast. Install requirements.txt too if you want to run the app.
+fastapi
+uvicorn
+pydantic
+python-dotenv
+openai
+groq
+streamlit>=1.64
+pypdf
+python-docx
+requests
+fpdf2
+qdrant-client
+numpy
+httpx
 pytest>=8

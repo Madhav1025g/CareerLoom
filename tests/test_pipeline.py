@@ -297,3 +297,75 @@ def test_lost_keywords_are_reported(pipeline, monkeypatch):
     monkeypatch.setattr(main, "call_llm", llm)
     ats = pipeline.orchestrator(dict(REQUEST), "req-lost")["workflow"]["ats_optimization"]
     assert ats["lost_keywords"] == ["Docker"]
+
+
+# ---------------------------------------------------------------- new features
+
+def test_add_skill_creates_line_in_skills_section():
+    result = main.add_skill_to_resume(SOURCE_RESUME, "Kubernetes")
+    lines = result.splitlines()
+    assert "Additional Skills: Kubernetes" in lines
+    # Inserted inside TECHNICAL SKILLS, before the next section
+    assert lines.index("Additional Skills: Kubernetes") < lines.index("EDUCATION")
+    assert lines.index("Additional Skills: Kubernetes") > lines.index("TECHNICAL SKILLS")
+
+
+def test_add_skill_appends_to_existing_line():
+    once = main.add_skill_to_resume(SOURCE_RESUME, "Kubernetes")
+    twice = main.add_skill_to_resume(once, "Terraform")
+    assert "Additional Skills: Kubernetes, Terraform" in twice.splitlines()
+
+
+def test_add_skill_without_skills_section():
+    result = main.add_skill_to_resume("Jordan Lee\nEXPERIENCE\n- Built things", "Go")
+    assert result.rstrip().endswith("SKILLS\nAdditional Skills: Go")
+
+
+class FakeRateLimit(Exception):
+    status_code = 429
+
+
+def test_groq_rate_limit_becomes_busy_error(monkeypatch):
+    class FakeGroq:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    raise FakeRateLimit("Rate limit reached for model on tokens per day (TPD)")
+
+    monkeypatch.setattr(main, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(main, "groq_client", FakeGroq)
+    monkeypatch.setattr(main, "client", None)
+    with pytest.raises(main.LLMBusyError) as info:
+        main.call_llm("hi")
+    assert info.value.daily is True
+
+
+def test_api_returns_429_when_busy(monkeypatch):
+    def busy(prompt):
+        raise main.LLMBusyError("busy")
+
+    monkeypatch.setattr(main, "call_llm", busy)
+    response = TestClient(main.app).post("/generate_resume", json={**REQUEST, "api_key": "test-key-123"})
+    assert response.status_code == 429
+
+
+def test_compare_jobs_ranks_best_fit_first(pipeline, monkeypatch):
+    def llm(prompt):
+        if '"job_keywords"' in prompt and "Rust" in prompt:
+            return '{"job_keywords": ["Rust", "Go", "Kubernetes"], "explanation": "Different stack."}'
+        return fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    results = main.compare_jobs(SOURCE_RESUME, REQUEST["skills"],
+                                ["Systems engineer: Rust, Go, Kubernetes", "", REQUEST["job_description"]])
+    assert [r["index"] for r in results] == [2, 0]  # empty job skipped, best match first
+    assert results[0]["ats_score"] > results[1]["ats_score"]
+
+
+@pytest.mark.parametrize("tone", list(main.COVER_LETTER_TONES))
+def test_cover_letter_tone_in_prompt(pipeline, monkeypatch, tone):
+    prompts = []
+    monkeypatch.setattr(main, "call_llm", lambda p: prompts.append(p) or fake_llm(p))
+    main.cover_letter_agent(dict(REQUEST), None, tone)
+    assert main.COVER_LETTER_TONES[tone] in prompts[0]
