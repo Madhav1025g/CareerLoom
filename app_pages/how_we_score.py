@@ -30,7 +30,8 @@ focuses on whether your resume contains the terms a recruiter for this job would
 - Matching is whole-term and case-insensitive: "Java" does not count inside "JavaScript", while "REST API"
   matches "REST APIs".
 - Your original and tailored resumes are checked against **the same list**, so the comparison is fair.
-- The same job description always gets the same list — on every page (including Compare jobs) and every run.
+- The same job description gets the same list on every page (including Compare jobs) and every run. The list
+  is only re-extracted when the app restarts, for example after an update.
 - Without a job description, the skills you enter are used instead.
 
 ### 2. Semantic match ({semantic_pct}%)
