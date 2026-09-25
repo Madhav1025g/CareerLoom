@@ -64,6 +64,20 @@ header[data-testid="stHeader"] { background: rgba(255, 255, 255, 0.97); border-b
 .cl-rank { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px;
            background: #1E3A8A; color: #fff; font-weight: 700; font-size: 0.85rem; margin-right: 0.5rem; }
 .cl-prose { max-width: 780px; color: #334155; line-height: 1.65; }
+/* Requirement checklist — status is always shown as a text label, never by color alone */
+.cl-reqs { border: 1px solid #E3E7EF; border-radius: 12px; padding: 0.2rem 1rem; margin: 0.4rem 0 0.6rem 0; }
+.cl-req { display: flex; gap: 0.8rem; padding: 0.75rem 0; border-bottom: 1px solid #EEF1F5; }
+.cl-req:last-child { border-bottom: none; }
+.cl-status { flex: 0 0 4.8rem; text-align: center; font-size: 0.74rem; font-weight: 700; border-radius: 999px;
+             padding: 0.18rem 0; height: fit-content; border: 1px solid; }
+.cl-status-met { color: #166534; background: #F0FDF4; border-color: #BBF7D0; }
+.cl-status-partial { color: #92400E; background: #FFFBEB; border-color: #FDE68A; }
+.cl-status-not_met { color: #991B1B; background: #FEF2F2; border-color: #FECACA; }
+.cl-req-text { font-weight: 600; color: #0F172A; }
+.cl-req-meta { font-size: 0.78rem; color: #64748B; margin-top: 0.1rem; }
+.cl-req-reason { font-size: 0.88rem; color: #334155; margin-top: 0.25rem; }
+.cl-req-evidence { font-size: 0.84rem; color: #475569; font-style: italic; margin-top: 0.2rem;
+                   border-left: 2px solid #CBD5E1; padding-left: 0.55rem; }
 .cl-prose h3 { color: #0F172A; margin-top: 1.6rem; }
 
 .cl-footer { border-top: 1px solid #E3E7EF; margin-top: 3rem; padding-top: 1.2rem; color: #94A3B8; font-size: 0.82rem;
@@ -137,3 +151,30 @@ def busy_message(exc) -> str:
 def page_intro(eyebrow: str, title: str, lead: str):
     st.markdown(f'''<div class="cl-hero cl-hero-sm"><div class="cl-eyebrow">{eyebrow}</div>
 <div class="cl-h1">{title}</div><div class="cl-lead">{lead}</div></div>''', unsafe_allow_html=True)
+
+
+STATUS_LABELS = {"met": "Met", "partial": "Partial", "not_met": "Missing"}
+CATEGORY_LABELS = {"experience_years": "Experience", "skill": "Skill", "knowledge": "Knowledge", "education": "Education",
+                   "certification": "Certification", "title": "Job title", "soft_skill": "Soft skill"}
+
+
+def requirement_checklist(items, before_items=None):
+    """Recruiter-style checklist: gaps first (required before preferred), then what's already met."""
+    before_status = {i["id"]: i["status"] for i in (before_items or [])}
+    order = {"not_met": 0, "partial": 1, "met": 2}
+    rows = []
+    # Gaps first; within each status, the requirements that carry the most weight first.
+    for item in sorted(items, key=lambda i: (order[i["status"]], -i.get("weight", 1))):
+        meta = [item["importance"].title(), CATEGORY_LABELS.get(item["category"], "")]
+        was = before_status.get(item["id"])
+        if was and was != item["status"]:
+            meta.append(f"was {STATUS_LABELS[was]} before tailoring")
+        evidence = (f'<div class="cl-req-evidence">&ldquo;{html.escape(item["evidence"])}&rdquo;</div>'
+                    if item.get("evidence") else "")
+        reason = f'<div class="cl-req-reason">{html.escape(item["reason"])}</div>' if item.get("reason") else ""
+        rows.append(
+            f'<div class="cl-req"><div class="cl-status cl-status-{item["status"]}">{STATUS_LABELS[item["status"]]}</div>'
+            f'<div><div class="cl-req-text">{html.escape(item["text"])}</div>'
+            f'<div class="cl-req-meta">{" · ".join(html.escape(m) for m in meta if m)}</div>{reason}{evidence}</div></div>'
+        )
+    st.markdown(f'<div class="cl-reqs">{"".join(rows)}</div>', unsafe_allow_html=True)

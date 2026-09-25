@@ -3,6 +3,7 @@ Shared test setup: no real API keys, no network. The LLM and embedding model are
 with deterministic fakes so the whole pipeline runs offline in about a second.
 """
 import hashlib
+import json
 import os
 import re
 import sys
@@ -70,13 +71,43 @@ REQUEST = {
 }
 
 
+# Fake requirement extraction: keywords dedupe to Python, FastAPI, AWS, Docker, Kubernetes.
+REQUIREMENTS = [
+    {"text": "3+ years of backend experience", "category": "experience_years", "importance": "required",
+     "min_years": 3, "max_years": None, "keywords": []},
+    {"text": "Python", "category": "skill", "importance": "required", "keywords": ["Python"]},
+    {"text": "FastAPI web services", "category": "skill", "importance": "required", "keywords": ["FastAPI", "Python"]},
+    {"text": "AWS cloud experience", "category": "skill", "importance": "required", "keywords": ["AWS"]},
+    {"text": "Containers with Docker", "category": "skill", "importance": "required", "keywords": ["Docker"]},
+    {"text": "Kubernetes", "category": "skill", "importance": "preferred", "keywords": ["Kubernetes"]},
+    {"text": "Strong backend fundamentals", "category": "knowledge", "importance": "required", "keywords": []},
+    {"text": "Collaborative team player", "category": "soft_skill", "importance": "required", "keywords": []},
+]
+
+# Fake judge verdicts, keyed by the ids extraction assigns (r1 = years, judged in code).
+JUDGEMENTS = json.dumps({"results": [
+    {"id": "r2", "status": "met", "evidence": "Languages: Python, JavaScript, SQL", "reason": "Listed and used."},
+    {"id": "r3", "status": "met", "evidence": "REST APIs serving 1M+ daily requests using Python and FastAPI", "reason": "Built APIs."},
+    {"id": "r4", "status": "met", "evidence": "Deployed microservices on AWS Lambda and ECS", "reason": "Deployed on AWS."},
+    {"id": "r5", "status": "met", "evidence": "Cloud & DevOps: AWS, Docker, GitHub Actions", "reason": "Listed."},
+    {"id": "r6", "status": "not_met", "evidence": "", "reason": "No Kubernetes experience shown."},
+    {"id": "r7", "status": "met", "evidence": "Built and maintained REST APIs serving 1M+ daily requests", "reason": "Shows fundamentals."},
+    {"id": "r8", "status": "partial", "evidence": "a quote that is not in the resume", "reason": "Implied."},
+]})
+
+
+def requirements_json(requirements):
+    return "Here you go: " + json.dumps({"requirements": requirements})
+
+
 def fake_llm(prompt: str, **kwargs) -> str:
     """Route each agent's prompt to a canned response."""
     if "candidate_level" in prompt:
         return '```json\n{"candidate_level": "Mid-Level", "primary_domain": "Backend", "years_experience": 5}\n```'
-    if '"job_keywords"' in prompt:
-        return ('Sure! {"job_keywords": ["Python", "FastAPI", "AWS", "Docker", "Kubernetes", "Python"], '
-                '"explanation": "Kubernetes is not mentioned."}')
+    if '"requirements": [' in prompt:
+        return requirements_json(REQUIREMENTS)
+    if '"results": [' in prompt:
+        return JUDGEMENTS
     if "JSON array" in prompt:
         return ('[{"issue": "Grammar", "current_text": "Developed internal dashboards in React", '
                 '"suggested_fix": "Developed internal analytics dashboards in React"},'
@@ -116,6 +147,6 @@ def pipeline(monkeypatch):
 @pytest.fixture(autouse=True)
 def fresh_keyword_cache():
     """Each test starts with an empty job-keyword cache so fakes aren't shadowed by earlier tests."""
-    main._JOB_KEYWORD_CACHE.clear()
+    main._JOB_REQUIREMENTS_CACHE.clear()
     yield
-    main._JOB_KEYWORD_CACHE.clear()
+    main._JOB_REQUIREMENTS_CACHE.clear()

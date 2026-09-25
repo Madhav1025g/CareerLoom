@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from conftest import REQUEST, SOURCE_RESUME, TAILORED_RESUME, FakeEmbedder, fake_llm
+from conftest import requirements_json, REQUEST, SOURCE_RESUME, TAILORED_RESUME, FakeEmbedder, fake_llm
 
 
 # ---------------------------------------------------------------- parsing helpers
@@ -197,7 +197,7 @@ def test_ats_gap_analysis_runs_before_writer(pipeline, monkeypatch):
     order = []
 
     def llm(prompt, **kwargs):
-        if '"job_keywords"' in prompt:
+        if '"requirements": [' in prompt:
             order.append("ats")
         elif "Generate a professional ATS-friendly resume" in prompt:
             order.append("writer")
@@ -352,8 +352,10 @@ def test_api_returns_429_when_busy(monkeypatch):
 
 def test_compare_jobs_ranks_best_fit_first(pipeline, monkeypatch):
     def llm(prompt, **kwargs):
-        if '"job_keywords"' in prompt and "Rust" in prompt:
-            return '{"job_keywords": ["Rust", "Go", "Kubernetes"], "explanation": "Different stack."}'
+        if '"requirements": [' in prompt and "Rust" in prompt:
+            return requirements_json([{"text": "Rust", "category": "skill", "keywords": ["Rust"]}, {"text": "Go", "category": "skill", "keywords": ["Go"]}, {"text": "Kubernetes", "category": "skill", "keywords": ["Kubernetes"]}])
+        if '"results": [' in prompt and "Rust" in prompt:
+            return '{"results": []}'
         return fake_llm(prompt)
 
     monkeypatch.setattr(main, "call_llm", llm)
@@ -377,7 +379,7 @@ def test_same_job_gets_same_keywords_across_calls_and_pages(pipeline, monkeypatc
     calls = []
 
     def llm(prompt, **kwargs):
-        if '"job_keywords"' in prompt:
+        if '"requirements": [' in prompt:
             calls.append(kwargs.get("temperature"))
         return fake_llm(prompt)
 
@@ -399,17 +401,18 @@ def test_keyword_extraction_sees_only_the_job_description(pipeline, monkeypatch)
 
 
 def test_keyword_extraction_retries_then_falls_back_to_skills(pipeline, monkeypatch):
-    replies = iter(["not json", '{"job_keywords": []}'])
-    monkeypatch.setattr(main, "call_llm", lambda p, **k: next(replies) if '"job_keywords"' in p else fake_llm(p))
+    replies = iter(["not json", '{"requirements": []}'])
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: next(replies) if '"requirements": [' in p else fake_llm(p))
     ats = main.ats_agent(dict(REQUEST))
     assert ats["keyword_source"] == "skills"
     assert ats["job_keywords"] == []
     assert "couldn't read this job's key terms" in ats["explanation"]
-    assert main._JOB_KEYWORD_CACHE == {}  # failures are not cached
+    assert main._JOB_REQUIREMENTS_CACHE == {}  # failures are not cached
 
 
 def test_keyword_extraction_retry_succeeds(pipeline, monkeypatch):
-    replies = iter(["oops", '{"job_keywords": ["Python", "AWS"]}'])
+    replies = iter(["oops", requirements_json([{"text": "Python", "category": "skill", "keywords": ["Python"]},
+                                               {"text": "AWS", "category": "skill", "keywords": ["AWS"]}])])
     monkeypatch.setattr(main, "call_llm", lambda p, **k: next(replies))
     assert main.extract_job_keywords("Needs Python and AWS") == ["Python", "AWS"]
 
@@ -419,3 +422,86 @@ def test_gap_explanation_matches_the_numbers():
     assert text == "Your resume covers 2 of 3 key terms from this job. Missing: Go."
     assert "all 2 key terms" in main.gap_explanation("jd", ["A", "B"], ["A", "B"], [])
     assert "Add a job description" in main.gap_explanation(None, [], [], [])
+
+
+# ---------------------------------------------------------------- requirement matching
+
+from datetime import date  # noqa: E402
+
+TODAY = date(2026, 9, 25)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Senior engineer with 6+ years of professional experience", (6.0, "stated in your resume")),
+    ("5 years of experience in backend development", (5.0, "stated in your resume")),
+    ("Eng | Acme | Jan 2021 - Present\nDev | Beta | Mar 2018 – Dec 2020\nB.S. | State University | 2014 - 2018",
+     (8.6, "calculated from your job dates")),
+    ("A | Jan 2020 - Dec 2022\nB | Jun 2021 - Jun 2021", (3.0, "calculated from your job dates")),  # overlap once
+    ("Python developer", (None, None)),
+])
+def test_resume_years(text, expected):
+    assert main.resume_years(text, today=TODAY) == expected
+
+
+@pytest.mark.parametrize("low, high, years, status, credit", [
+    (2, 10, 6, "met", 1.0),          # inside the range
+    (6, None, 5, "met", 1.0),        # within the 1-year tolerance
+    (6, None, 3, "partial", 0.5),    # 3 of 6 years -> half credit
+    (3, None, 9, "met", 1.0),        # "3+" has no upper limit
+    (2, 4, 6, "partial", 0.67),      # above a stated maximum -> overqualified
+    (5, None, None, "partial", 0.5), # years not found
+])
+def test_judge_years(low, high, years, status, credit):
+    verdict = main.judge_years({"min_years": low, "max_years": high}, years, "stated in your resume")
+    assert (verdict["status"], verdict["credit"]) == (status, credit)
+    assert verdict["reason"]
+
+
+def test_evidence_must_exist_in_resume():
+    assert main.evidence_in_resume("Deployed microservices on AWS Lambda and ECS", SOURCE_RESUME)
+    assert main.evidence_in_resume("deployed microservices on aws lambda & ecs", SOURCE_RESUME)  # near-verbatim
+    assert not main.evidence_in_resume("Led a team of 20 engineers at Google", SOURCE_RESUME)
+
+
+def test_requirement_extraction_is_normalized(pipeline, monkeypatch):
+    raw = [{"text": "Several years of experience", "category": "experience_years"},  # no numbers -> knowledge
+           {"text": "Go", "category": "weird", "importance": "nice"},                   # bad values -> defaults
+           {"category": "skill"}]                                                        # no text -> dropped
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: requirements_json(raw))
+    reqs = main.extract_job_requirements("Some job")
+    assert [(r["id"], r["category"], r["importance"]) for r in reqs] == [
+        ("r1", "knowledge", "required"), ("r2", "skill", "required")]
+
+
+def test_evaluate_requirements_scores_like_a_scorecard(pipeline):
+    reqs = main.extract_job_requirements(REQUEST["job_description"])
+    result = main.evaluate_requirements(SOURCE_RESUME, reqs)
+    by_text = {i["text"]: i for i in result["items"]}
+    assert by_text["3+ years of backend experience"]["status"] == "met"          # 5 years stated, checked in code
+    assert by_text["Kubernetes"]["status"] == "not_met"
+    soft = by_text["Collaborative team player"]
+    assert soft["status"] == "not_met" and "couldn't find the quoted evidence" in soft["reason"]  # fake quote rejected
+    assert soft["weight"] == main.SOFT_SKILL_WEIGHT
+    # 6 required met (weight 3 each) of 3*6 + preferred 1 + soft 0.5 = 18 / 19.5
+    assert result["score"] == round(100 * 18 / 19.5)
+
+
+def test_evaluate_requirements_uses_cache(pipeline, monkeypatch):
+    reqs = main.extract_job_requirements(REQUEST["job_description"])
+    cache, calls = {}, []
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: calls.append(p) or fake_llm(p))
+    first = main.evaluate_requirements(SOURCE_RESUME, reqs, cache=cache)
+    second = main.evaluate_requirements(SOURCE_RESUME, reqs, cache=cache)
+    assert first is second and len(calls) == 1
+
+
+def test_orchestrator_reports_requirement_match_before_and_after(pipeline):
+    wf = pipeline.orchestrator(dict(REQUEST), "req-reqs")["workflow"]
+    match = wf["requirement_match"]
+    assert match["before"]["score"] is not None and match["after"]["score"] is not None
+    assert {i["id"] for i in match["before"]["items"]} == {i["id"] for i in match["after"]["items"]}
+
+
+def test_no_job_description_means_no_requirement_score(pipeline):
+    wf = pipeline.orchestrator({**REQUEST, "job_description": None}, "req-nojd")["workflow"]
+    assert wf["requirement_match"]["before"]["score"] is None

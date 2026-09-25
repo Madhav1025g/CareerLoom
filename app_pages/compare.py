@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from main import LLMBusyError, LLMUnavailableError, compare_jobs, log_event
-from ui_common import busy_message, chips, extract_text_from_upload, page_intro
+from ui_common import busy_message, chips, extract_text_from_upload, page_intro, requirement_checklist
 
 MAX_JOBS = 3
 MAX_COMPARISONS_PER_SESSION = 3
@@ -66,8 +66,10 @@ if compare_clicked:
         skills = [s.strip() for s in skills_input.split(",") if s.strip()]
         with st.spinner(f"Scoring your resume against {len(filled)} jobs..."):
             try:
+                # Shared per-session cache: the same resume + job gets the same verdicts as on Tailor resume.
                 st.session_state.comparison = compare_jobs(resume_text, skills, job_descriptions,
-                                                           st.session_state.get("current_role", ""))
+                                                           st.session_state.get("current_role", ""),
+                                                           eval_cache=st.session_state.setdefault("req_eval_cache", {}))
                 st.session_state.comparison_count += 1
             except LLMBusyError as exc:
                 st.warning(busy_message(exc))
@@ -84,8 +86,9 @@ results = st.session_state.get("comparison")
 if results:
     st.write("")
     st.markdown('<div class="cl-section-title">Your best matches</div>'
-                '<div class="cl-section-sub">Ranked by ATS match. Tailoring can raise each score — use the button to '
-                'tailor your resume for a job.</div>', unsafe_allow_html=True)
+                '<div class="cl-section-sub">Ranked by requirement match (how a recruiter would judge you), then ATS '
+                'match. Tailoring can raise both — use the button to tailor your resume for a job.</div>',
+                unsafe_allow_html=True)
 
     def job_label(r):
         first_line = next((line.strip() for line in r["job_description"].splitlines() if line.strip()), "")
@@ -95,7 +98,7 @@ if results:
     # Grouped bars, one group per job: overall / keyword / semantic
     rows = []
     for r in results:
-        for measure, value in (("Overall", r["ats_score"]), ("Keyword", r["keyword_score"]), ("Semantic", r["semantic_score"])):
+        for measure, value in (("Requirements", r["requirement_match"]["score"]), ("ATS", r["ats_score"])):
             if value is not None:
                 rows.append((f"Job {r['index'] + 1}", measure, value))
     data = pd.DataFrame(rows, columns=["Job", "Measure", "Score"])
@@ -103,15 +106,15 @@ if results:
     encoding = dict(
         y=alt.Y("Job:N", sort=order, title=None, axis=alt.Axis(ticks=False, domain=False, labelColor="#334155",
                                                                labelFontSize=13, labelPadding=8)),
-        yOffset=alt.YOffset("Measure:N", sort=["Overall", "Keyword", "Semantic"], scale=alt.Scale(paddingInner=0.12)),
+        yOffset=alt.YOffset("Measure:N", sort=["Requirements", "ATS"], scale=alt.Scale(paddingInner=0.12)),
         x=alt.X("Score:Q", title="Score (0–100)", scale=alt.Scale(domain=[0, 108]),
                 axis=alt.Axis(values=[0, 25, 50, 75, 100], gridColor="#EEF1F5", domain=False, ticks=False,
                               labelColor="#64748B", titleColor="#64748B", titleFontWeight="normal")),
     )
     bars = alt.Chart(data).mark_bar(cornerRadiusEnd=4).encode(
         **encoding,
-        color=alt.Color("Measure:N", sort=["Overall", "Keyword", "Semantic"],
-                        scale=alt.Scale(domain=["Overall", "Keyword", "Semantic"], range=["#1E3A8A", "#5B7BC8", "#A9BCE6"]),
+        color=alt.Color("Measure:N", sort=["Requirements", "ATS"],
+                        scale=alt.Scale(domain=["Requirements", "ATS"], range=["#1E3A8A", "#94A8D8"]),
                         legend=alt.Legend(title=None, orient="top", direction="horizontal", labelColor="#334155",
                                           symbolType="square")),
         tooltip=["Job:N", "Measure:N", "Score:Q"],
@@ -119,21 +122,35 @@ if results:
     labels = alt.Chart(data).mark_text(align="left", dx=4, fontSize=11, color="#334155").encode(**encoding, text="Score:Q")
     st.altair_chart((bars + labels).properties(height=alt.Step(16)).configure_view(strokeWidth=0), width="stretch")
     with st.expander("View as table"):
-        st.dataframe(data.pivot(index="Job", columns="Measure", values="Score").reindex(order).reset_index(),
-                     hide_index=True, width="stretch")
+        table = pd.DataFrame([{"Job": f"Job {r['index'] + 1}", "Requirement match": r["requirement_match"]["score"],
+                               "ATS match": r["ats_score"], "Keyword": r["keyword_score"], "Semantic": r["semantic_score"]}
+                              for r in results])
+        st.dataframe(table, hide_index=True, width="stretch")
 
     for rank, r in enumerate(results, start=1):
         with st.container(border=True):
             head, score, action = st.columns([4, 1, 1.4], vertical_alignment="center")
             head.markdown(f'<span class="cl-rank">{rank}</span>**{job_label(r)}**', unsafe_allow_html=True)
-            score.metric("ATS match", f"{r['ats_score']}/100", label_visibility="collapsed")
+            req_score = r["requirement_match"]["score"]
+            score.metric("Requirement match", f"{req_score}/100" if req_score is not None else "—",
+                         label_visibility="collapsed")
             if action.button("Tailor for this job", key=f"tailor_job_{r['index']}", width="stretch"):
                 st.session_state.job_description_area = r["job_description"]
                 st.switch_page(st.session_state.pages["tailor"])
+            items = r["requirement_match"]["items"]
+            met = sum(i["status"] == "met" for i in items)
+            st.caption(f"Requirement match {req_score if req_score is not None else '—'} · ATS match {r['ats_score']} · "
+                       f"{met} of {len(items)} requirements met")
+            gaps = [i for i in items if i["status"] != "met" and i["importance"] == "required"]
+            if gaps:
+                st.markdown("**Biggest gaps:** " + "; ".join(f"{g['text']} ({g['reason'].rstrip('.')})" for g in gaps[:3]))
+            if items:
+                with st.expander("Full requirement checklist"):
+                    requirement_checklist(items)
             if r.get("keyword_source") == "skills":
                 st.info(r["explanation"])
             elif r.get("explanation"):
-                st.markdown(r["explanation"])
+                st.caption(r["explanation"])
             if r.get("covered_keywords"):
                 st.markdown("**You have**")
                 chips(r["covered_keywords"], "cl-chip-good")

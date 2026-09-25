@@ -8,7 +8,8 @@ import streamlit as st
 import main
 from main import (
     APP_NAME, COVER_LETTER_TONES, PIPELINE_STEPS, LLMBusyError, LLMUnavailableError, ResumeGenerationError,
-    add_skill_to_resume, ats_breakdown, cover_letter_agent, interview_prep_agent, log_event, orchestrator,
+    add_skill_to_resume, ats_breakdown, cover_letter_agent, evaluate_requirements, interview_prep_agent, log_event,
+    orchestrator, requirement_cache_key,
 )
 from document_builder import (
     DEFAULT_TEMPLATE,
@@ -20,7 +21,9 @@ from document_builder import (
     letter_to_html,
     resume_to_html,
 )
-from ui_common import busy_message, chips, extract_text_from_upload, file_stem, increment_counter, record_feedback
+from ui_common import (
+    busy_message, chips, extract_text_from_upload, file_stem, increment_counter, record_feedback, requirement_checklist,
+)
 
 # ------------------------------------------------------------------
 # Header + hero
@@ -232,6 +235,11 @@ if generate_clicked:
             st.session_state.last_result = result
             st.session_state.last_full_name = full_name
             st.session_state.last_request = user_request
+            match = workflow.get("requirement_match") or {}
+            if match.get("requirements"):
+                cache = st.session_state.setdefault("req_eval_cache", {})
+                cache[requirement_cache_key(resume_text, match["requirements"])] = match["before"]
+                cache[requirement_cache_key(st.session_state.docs["resume"], match["requirements"])] = match["after"]
             st.session_state.letter_tone = "Formal"
             st.session_state.pop("interview_prep", None)
 
@@ -301,11 +309,16 @@ def change_label(change: int) -> str:
 
 
 def score_rows(before: dict, after: dict, short: bool = False) -> list[tuple[str, int, int]]:
-    names = ("Overall", "Keyword", "Semantic") if short else ("Overall ATS score", "Keyword match", "Semantic match")
-    rows = [(names[0], before["ats_score"], after["ats_score"]),
-            (names[1], before["keyword_score"], after["keyword_score"])]
+    """Rows for the before/after charts. `before`/`after` may carry a "requirement_score" too."""
+    names = (("Requirements", "ATS", "Keyword", "Semantic") if short
+             else ("Requirement match", "ATS match", "Keyword match", "Semantic match"))
+    rows = []
+    if before.get("requirement_score") is not None and after.get("requirement_score") is not None:
+        rows.append((names[0], before["requirement_score"], after["requirement_score"]))
+    rows += [(names[1], before["ats_score"], after["ats_score"]),
+             (names[2], before["keyword_score"], after["keyword_score"])]
     if before.get("semantic_score") is not None and after.get("semantic_score") is not None:
-        rows.append((names[2], before["semantic_score"], after["semantic_score"]))
+        rows.append((names[3], before["semantic_score"], after["semantic_score"]))
     return rows
 
 
@@ -313,23 +326,24 @@ def ats_bar_chart(before: dict, after: dict):
     """Compact grouped bars (original vs. tailored) sized for the narrow download column."""
     rows = score_rows(before, after, short=True)
     long = pd.DataFrame(
-        [(m, version, score, f"{a - b:+d}") for m, b, a in rows for version, score in (("Original", b), ("Tailored", a))],
+        [(m, version, score, f"{a - b:+d}") for m, b, a in rows for version, score in (("Before", b), ("After", a))],
         columns=["Measure", "Version", "Score", "Change"],
     )
     order = [m for m, _, _ in rows]
     encoding = dict(
         y=alt.Y("Measure:N", sort=order, title=None, scale=alt.Scale(paddingInner=0.3),
                 axis=alt.Axis(ticks=False, domain=False, labelColor="#334155", labelFontSize=12, labelPadding=6)),
-        yOffset=alt.YOffset("Version:N", sort=["Original", "Tailored"], scale=alt.Scale(paddingInner=0.12)),
+        yOffset=alt.YOffset("Version:N", sort=["Before", "After"], scale=alt.Scale(paddingInner=0.12)),
         # Extra room past 100 keeps the value labels at the bar tips inside the chart.
         x=alt.X("Score:Q", title=None, scale=alt.Scale(domain=[0, 118]),
                 axis=alt.Axis(values=[0, 50, 100], gridColor="#EEF1F5", domain=False, ticks=False, labelColor="#64748B")),
     )
     bars = alt.Chart(long).mark_bar(cornerRadiusEnd=4).encode(
         **encoding,
-        color=alt.Color("Version:N", scale=alt.Scale(domain=["Original", "Tailored"], range=["#94A8D8", "#1E3A8A"]),
+        color=alt.Color("Version:N", scale=alt.Scale(domain=["Before", "After"], range=["#94A8D8", "#1E3A8A"]),
                         legend=alt.Legend(title=None, orient="top", direction="horizontal", labelFontSize=11,
-                                          labelColor="#334155", symbolType="square", symbolSize=90)),
+                                          labelColor="#334155", symbolType="square", symbolSize=70,
+                                          labelLimit=0, columnPadding=8, symbolOffset=0, offset=4)),
         tooltip=[alt.Tooltip("Measure:N"), alt.Tooltip("Version:N", title="Resume"), alt.Tooltip("Score:Q"),
                  alt.Tooltip("Change:N", title="Change after tailoring")],
     )
@@ -440,6 +454,17 @@ if "last_result" in st.session_state and "docs" in st.session_state:
     else:
         live = {"covered": [], "missing": ats_data.get("still_missing", [])}
         after = ats_data.get("after", before)
+    # Requirement match: judged by AI, so it only updates on generation or when the user re-checks after edits.
+    req_data = workflow.get("requirement_match") or {}
+    requirements = req_data.get("requirements", [])
+    req_before = req_data.get("before") or {}
+    req_cache = st.session_state.setdefault("req_eval_cache", {})
+    req_current = req_cache.get(requirement_cache_key(st.session_state.docs["resume"], requirements)) if requirements else None
+    req_stale = bool(requirements) and req_current is None
+    req_after = req_current or req_data.get("after") or {}
+    before = {**before, "requirement_score": req_before.get("score")}
+    after = {**after, "requirement_score": req_after.get("score")}
+
     completeness = workflow.get("completeness_check", {})
     suggestions = workflow["reviewer"].get("suggestions", [])
     analyzer = workflow.get("analyzer", {}) if isinstance(workflow.get("analyzer"), dict) else {}
@@ -460,13 +485,22 @@ if "last_result" in st.session_state and "docs" in st.session_state:
             st.toast("Thanks for your feedback!")
 
     change = after["ats_score"] - before["ats_score"]
-    m1, m2, m3, m4 = st.columns(4)
     meaningful = abs(change) > SCORE_NOISE
-    m1.metric("ATS match", f"{after['ats_score']}/100", delta=change_label(change),
+    m1, m2, m3, m4 = st.columns(4)
+    if after["requirement_score"] is not None:
+        req_change = after["requirement_score"] - before["requirement_score"]
+        req_meaningful = abs(req_change) > SCORE_NOISE and not req_stale
+        m1.metric("Requirement match", f"{after['requirement_score']}/100",
+                  delta="Re-check after your edits" if req_stale else change_label(req_change),
+                  delta_color="normal" if req_meaningful else "off", delta_arrow="auto" if req_meaningful else "off",
+                  border=True, help="How a recruiter would judge your resume against each of the job's requirements.")
+    else:
+        m1.metric("Requirement match", "—", border=True,
+                  help="Add a job description to see how you match its requirements.")
+    m2.metric("ATS match", f"{after['ats_score']}/100", delta=change_label(change),
               delta_color="normal" if meaningful else "off", delta_arrow="auto" if meaningful else "off", border=True,
-              help="Includes your edits and added skills." if edited else "Scored against this job's key terms.")
-    m2.metric("Experience preserved", f"{completeness.get('completeness_pct', 100)}%", border=True)
-    m3.metric("Review suggestions", len(suggestions), border=True)
+              help="Job keywords + semantic similarity, the way ATS software searches. Updates live as you edit.")
+    m3.metric("Experience preserved", f"{completeness.get('completeness_pct', 100)}%", border=True)
     m4.metric("Candidate level", analyzer.get("candidate_level") or "—", border=True)
 
     style_col, style_note_col = st.columns([2, 3], vertical_alignment="center")
@@ -478,7 +512,7 @@ if "last_result" in st.session_state and "docs" in st.session_state:
         st.caption(TEMPLATES[template]["description"] + " Applies to the preview and every download.")
 
     tab_resume, tab_snapshot, tab_letter, tab_prep, tab_ats, tab_review, tab_draft = st.tabs(
-        ["Tailored resume", "Recruiter snapshot", "Cover letter", "Interview prep", "ATS analysis",
+        ["Tailored resume", "Recruiter snapshot", "Cover letter", "Interview prep", "Job match",
          "Review suggestions", "First draft"],
         key="result_tab", on_change="rerun",  # stateful: buttons inside a tab don't jump back to the first tab
     )
@@ -492,9 +526,9 @@ if "last_result" in st.session_state and "docs" in st.session_state:
             for line in completeness["possibly_missing"]:
                 st.caption(f"• {line}")
         def resume_score_chart():
-            st.markdown('<div class="cl-card-title">ATS score</div>', unsafe_allow_html=True)
-            version = "your edited version" if edited else "tailored"
-            st.caption(f"Original vs. {version} · {change_label(change).lower()}")
+            st.markdown('<div class="cl-card-title">Match scores</div>', unsafe_allow_html=True)
+            st.caption(f"Before vs. after tailoring{' (with your edits)' if edited else ''}. "
+                       "Details in the Job match tab.")
             st.altair_chart(ats_bar_chart(before, after), width="stretch")
             if workflow["human_optimizer"].get("fallback_reason") == "lower ATS score":
                 st.caption("We kept the first draft because it scored higher than the polished version.")
@@ -557,9 +591,39 @@ if "last_result" in st.session_state and "docs" in st.session_state:
                 st.rerun()
 
     with tab_ats:
+        # ---- Requirement match: the recruiter's scorecard
+        st.markdown('<div class="cl-card-title">Requirement match</div>', unsafe_allow_html=True)
+        if not requirements:
+            st.info("Add a job description to see how your resume matches each of the job's requirements."
+                    if not request.get("job_description") else
+                    "We couldn't read this job's requirements this time. Try generating again.")
+        else:
+            if req_stale:
+                note_col, button_col = st.columns([3, 1], vertical_alignment="center")
+                note_col.info("You've edited your resume since the requirements were last checked.")
+                if button_col.button("Re-check requirements", type="primary", width="stretch"):
+                    if run_on_demand("Re-checking each requirement...", evaluate_requirements,
+                                     st.session_state.docs["resume"], requirements, req_cache):
+                        st.rerun()
+            items = req_after.get("items", [])
+            met = sum(i["status"] == "met" for i in items)
+            partial = sum(i["status"] == "partial" for i in items)
+            st.markdown(f"**{req_after.get('score')}/100** &nbsp;·&nbsp; {met} met, {partial} partial, "
+                        f"{len(items) - met - partial} missing of {len(items)} requirements")
+            for item in items:
+                if item["category"] in ("experience_years", "education") and item["status"] != "met" \
+                        and item["importance"] == "required":
+                    st.warning(item["reason"])
+            requirement_checklist(items, req_before.get("items"))
+            st.caption("Required items count 3×, preferred 1×, soft skills 0.5×. Met earns full credit, partial half; "
+                       "years of experience earn credit in proportion to the gap. Evidence is quoted from your resume "
+                       "and checked to make sure it's really there.")
+
+        # ---- ATS match: how software searches
+        st.divider()
         chart, table = ats_dumbbell_chart(before, after)
         overall_note = "about the same overall" if not meaningful else f"{change:+d} points overall"
-        st.markdown(f"**ATS score: original vs. tailored resume** &nbsp;·&nbsp; {overall_note}")
+        st.markdown(f"**All scores: original vs. tailored resume** &nbsp;·&nbsp; ATS match {overall_note}")
         st.altair_chart(chart, width="stretch")
         if ats_data.get("job_keywords"):
             st.caption("Both versions are scored against the same list of the job's key terms. Keyword match is the "

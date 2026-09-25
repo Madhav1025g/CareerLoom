@@ -3,7 +3,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 import main
-from conftest import REQUEST, ROOT, TAILORED_RESUME, FakeEmbedder, fake_llm
+from conftest import requirements_json, REQUEST, ROOT, TAILORED_RESUME, FakeEmbedder, fake_llm
 
 APP = str(ROOT / "streamlit_app.py")
 
@@ -35,11 +35,11 @@ def test_generate_shows_all_results(app):
     at = generate(app)
     assert not at.exception, at.exception
     assert [t.label for t in at.tabs] == [
-        "Tailored resume", "Recruiter snapshot", "Cover letter", "Interview prep", "ATS analysis",
+        "Tailored resume", "Recruiter snapshot", "Cover letter", "Interview prep", "Job match",
         "Review suggestions", "First draft",
     ]
     labels = [m.label for m in at.metric]
-    assert labels[:4] == ["ATS match", "Experience preserved", "Review suggestions", "Candidate level"]
+    assert labels[:4] == ["Requirement match", "ATS match", "Experience preserved", "Candidate level"]
     assert at.session_state.docs["resume"] == TAILORED_RESUME
     assert at.session_state.generation_count == 1
 
@@ -176,8 +176,10 @@ def test_other_pages_render(app, page):
 
 def test_compare_jobs_ranks_and_hands_off_to_tailor(app, monkeypatch):
     def llm(prompt, **kwargs):
-        if '"job_keywords"' in prompt and "Rust" in prompt:
-            return '{"job_keywords": ["Rust", "Go", "Kubernetes"], "explanation": "Different stack."}'
+        if '"requirements": [' in prompt and "Rust" in prompt:
+            return requirements_json([{"text": "Rust", "category": "skill", "keywords": ["Rust"]}, {"text": "Go", "category": "skill", "keywords": ["Go"]}, {"text": "Kubernetes", "category": "skill", "keywords": ["Kubernetes"]}])
+        if '"results": [' in prompt and "Rust" in prompt:
+            return '{"results": []}'
         return fake_llm(prompt)
 
     monkeypatch.setattr(main, "call_llm", llm)
@@ -191,3 +193,43 @@ def test_compare_jobs_ranks_and_hands_off_to_tailor(app, monkeypatch):
     assert not at.exception
     button(at, "Tailor for this job").click().run()
     assert at.session_state.job_description_area == REQUEST["job_description"]
+
+
+
+def test_requirement_match_shown_and_rechecked_after_edits(app, monkeypatch):
+    at = generate(app)
+    assert metric_value(at, "Requirement match").endswith("/100")
+    assert any("requirements" in m.value and "met" in m.value for m in at.markdown)
+
+    at.segmented_control(key="mode_resume").set_value("Edit").run()
+    editor = next(t for t in at.text_area if t.key and t.key.startswith("editor_resume_"))
+    editor.set_value(TAILORED_RESUME + "\nTOOLS\nKubernetes").run()
+    assert any(b.label == "Re-check requirements" for b in at.button)  # edited -> stale
+
+    judged = []
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: judged.append(p) or fake_llm(p))
+    button(at, "Re-check requirements").click().run()
+    assert len(judged) == 1 and not any(b.label == "Re-check requirements" for b in at.button)
+    assert not at.exception
+
+
+def test_compare_reuses_tailor_verdicts_for_same_resume_and_job(app, monkeypatch):
+    at = generate(app)
+    judge_calls = []
+
+    def llm(prompt, **kwargs):
+        if '"requirements": [' in prompt and "Spark" in prompt:
+            return requirements_json([{"text": "Apache Spark", "category": "skill", "keywords": ["Spark"]}])
+        if '"results": [' in prompt:
+            judge_calls.append(prompt)
+        return fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    at.switch_page("app_pages/compare.py").run()
+    at.text_area(key="compare_jd_0").set_value(at.session_state.last_request["job_description"]).run()
+    at.text_area(key="compare_jd_1").set_value("Data engineer: Spark, Airflow").run()
+    button(at, "Compare jobs").click().run()
+    same = next(r for r in at.session_state.comparison if r["index"] == 0)
+    assert same["requirement_match"] == at.session_state.last_result["workflow"]["requirement_match"]["before"]
+    assert len(judge_calls) == 1  # only the new job needed judging
+    assert not at.exception

@@ -509,52 +509,289 @@ def ats_breakdown(resume_text: str, job_description: str | None, skills: list[st
             "covered": coverage["covered"], "missing": coverage["missing"]}
 
 #------------------------
-# ATS OPTIMIZATION AGENT (RAG-aware)
+# REQUIREMENT MATCHING — how a recruiter or AI screener reads the job
 #------------------------
 
-# Job description hash -> extracted key terms. Derived from the job posting only (never the resume), so the
-# same job always gets the same list on every page and every run.
-_JOB_KEYWORD_CACHE: dict[str, list[str]] = {}
-_JOB_KEYWORD_CACHE_LIMIT = 256
+REQUIREMENT_CATEGORIES = ("experience_years", "skill", "knowledge", "education", "certification", "title", "soft_skill")
+IMPORTANCE_WEIGHT = {"required": 3.0, "preferred": 1.0}
+SOFT_SKILL_WEIGHT = 0.5      # soft skills count, but only a little, and only with evidence
+YEARS_TOLERANCE = 1          # being within a year of the asked range is a full match
+STATUS_CREDIT = {"met": 1.0, "partial": 0.5, "not_met": 0.0}
+
+# Job description hash -> extracted requirements. Derived from the job posting only (never the resume), so the
+# same job always gets the same requirements and keywords on every page and every run.
+_JOB_REQUIREMENTS_CACHE: dict[str, list[dict]] = {}
+_JOB_REQUIREMENTS_CACHE_LIMIT = 256
 
 
-def extract_job_keywords(job_description: str | None) -> list[str]:
-    """The job's 10-20 key hard requirements, extracted once per job description (temperature 0, one retry)."""
+def _as_years(value):
+    try:
+        years = float(value)
+    except (TypeError, ValueError):
+        return None
+    return years if 0 < years < 60 else None
+
+
+def _normalize_requirements(raw_items) -> list[dict]:
+    requirements = []
+    for item in raw_items if isinstance(raw_items, list) else []:
+        if not isinstance(item, dict) or not str(item.get("text", "")).strip():
+            continue
+        category = item.get("category") if item.get("category") in REQUIREMENT_CATEGORIES else "skill"
+        requirement = {
+            "id": f"r{len(requirements) + 1}",
+            "text": str(item["text"]).strip(),
+            "category": category,
+            "importance": "preferred" if item.get("importance") == "preferred" else "required",
+            "keywords": [str(k).strip() for k in item.get("keywords", []) if str(k).strip()]
+            if isinstance(item.get("keywords"), list) else [],
+        }
+        if category == "experience_years":
+            requirement["min_years"] = _as_years(item.get("min_years"))
+            requirement["max_years"] = _as_years(item.get("max_years"))
+            if requirement["min_years"] is None and requirement["max_years"] is None:
+                requirement["category"] = "knowledge"  # no usable numbers: let the judge assess it instead
+        requirements.append(requirement)
+    return requirements[:20]
+
+
+def extract_job_requirements(job_description: str | None) -> list[dict]:
+    """Break a job description into requirements (once per job: temperature 0, one retry, cached)."""
     job_description = (job_description or "").strip()
     if not job_description:
         return []
     cache_key = hashlib.sha256(job_description.encode()).hexdigest()
-    if cache_key in _JOB_KEYWORD_CACHE:
-        return list(_JOB_KEYWORD_CACHE[cache_key])
+    if cache_key in _JOB_REQUIREMENTS_CACHE:
+        return [dict(r) for r in _JOB_REQUIREMENTS_CACHE[cache_key]]
 
     prompt = f"""
-    You are an ATS (applicant tracking system) analyst. From the job description below, list the 10-20 most
-    important hard requirements a recruiter would search for: skills, tools, technologies, platforms,
-    methodologies, certifications, and domain terms. Copy each term exactly as the job description writes it,
-    keep each to 1-4 words, and exclude soft skills (e.g. "team player", "communication").
+    You are an experienced technical recruiter. Break the job description below into its distinct requirements
+    (8-18 of them), the way you would build a screening scorecard.
+
+    For each requirement give:
+    - "text": the requirement in plain words, e.g. "2-10 years of industry software experience",
+      "Strong backend engineering fundamentals", "Experience with AWS", "Bachelor's degree in Computer Science".
+    - "category": one of "experience_years" (ONLY overall professional experience with a number of years),
+      "skill" (a specific tool/technology/language), "knowledge" (concepts, domains, or broad competencies, e.g.
+      "distributed systems", "backend fundamentals", or skill-specific years like "3+ years of Python"),
+      "education", "certification", "title" (the role/seniority itself), "soft_skill".
+    - "importance": "required", or "preferred" when the job says preferred / nice to have / a plus / bonus.
+    - "min_years" and "max_years": numbers for "experience_years" only ("2-10 years" -> 2 and 10,
+      "5+ years" -> 5 and null). Use null otherwise.
+    - "keywords": 0-3 exact terms from the job description an ATS keyword search would use for this requirement
+      (e.g. ["AWS"], ["CI/CD"]). Use [] for experience_years and soft_skill.
 
     Job description:
     {job_description[:JD_PROMPT_CHARS]}
 
     Return ONLY JSON (no prose, no markdown fences):
-    {{"job_keywords": []}}
+    {{"requirements": [{{"text": "", "category": "", "importance": "", "min_years": null, "max_years": null, "keywords": []}}]}}
     """
 
-    keywords = []
+    requirements = []
     for attempt in range(2):
-        parsed = parse_json_object(call_llm(prompt, temperature=0))
-        raw = parsed.get("job_keywords") if isinstance(parsed.get("job_keywords"), list) else []
-        keywords = list(dict.fromkeys(str(k).strip() for k in raw if str(k).strip()))[:20]
-        if keywords:
+        requirements = _normalize_requirements(parse_json_object(call_llm(prompt, temperature=0)).get("requirements"))
+        if requirements:
             break
-        log_event("Job keyword extraction returned nothing usable — retrying" if attempt == 0
-                  else "Job keyword extraction failed — falling back to the candidate's stated skills")
+        log_event("Requirement extraction returned nothing usable — retrying" if attempt == 0
+                  else "Requirement extraction failed — falling back to the candidate's stated skills")
 
-    if keywords:
-        if len(_JOB_KEYWORD_CACHE) >= _JOB_KEYWORD_CACHE_LIMIT:
-            _JOB_KEYWORD_CACHE.pop(next(iter(_JOB_KEYWORD_CACHE)))
-        _JOB_KEYWORD_CACHE[cache_key] = keywords
-    return list(keywords)
+    if requirements:
+        if len(_JOB_REQUIREMENTS_CACHE) >= _JOB_REQUIREMENTS_CACHE_LIMIT:
+            _JOB_REQUIREMENTS_CACHE.pop(next(iter(_JOB_REQUIREMENTS_CACHE)))
+        _JOB_REQUIREMENTS_CACHE[cache_key] = requirements
+    return [dict(r) for r in requirements]
+
+
+def extract_job_keywords(job_description: str | None) -> list[str]:
+    """ATS search terms for the job: the keywords of its hard requirements (same cached extraction)."""
+    seen, keywords = set(), []
+    for requirement in extract_job_requirements(job_description):
+        if requirement["category"] in ("experience_years", "soft_skill"):
+            continue
+        for keyword in requirement["keywords"]:
+            if keyword.lower() not in seen:
+                seen.add(keyword.lower())
+                keywords.append(keyword)
+    return keywords[:20]
+
+# ---- years of experience (computed in code, never guessed by the AI)
+
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+_MONTH_RE = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+_RANGE_RE = re.compile(
+    rf"(?:{_MONTH_RE}\s+)?((?:19|20)\d{{2}})\s*(?:-|–|—|to)\s*(?:(?:{_MONTH_RE}\s+)?((?:19|20)\d{{2}})|(present|current|now|today))",
+    re.IGNORECASE,
+)
+_STATED_YEARS_RE = re.compile(
+    r"(\d{1,2}(?:\.\d)?)\s*\+?\s*(?:years?|yrs?)(?:\s+of)?(?:\s+[a-z/&-]+){0,3}?\s+(?:experience|expertise)",
+    re.IGNORECASE,
+)
+_EDUCATION_WORDS = ("university", "college", "school", "bachelor", "master", "b.s", "m.s", "b.sc", "m.sc",
+                    "b.tech", "m.tech", "phd", "degree", "gpa", "diploma")
+
+
+def resume_years(resume_text: str, today=None):
+    """
+    The candidate's total professional experience in years, and where it came from. A figure the candidate
+    states ("6+ years of experience") wins, since that's what a recruiter reads; otherwise the job date ranges
+    are merged (overlaps counted once, education lines skipped). Returns (None, None) when neither exists.
+    """
+    from datetime import date
+    today = today or date.today()
+    stated = [float(m) for m in _STATED_YEARS_RE.findall(resume_text or "")]
+    if stated:
+        return max(stated), "stated in your resume"
+
+    intervals = []
+    for line in (resume_text or "").splitlines():
+        if any(word in line.lower() for word in _EDUCATION_WORDS):
+            continue
+        for m in _RANGE_RE.finditer(line):
+            start_month = _MONTHS.get((m.group(1) or "")[:3].lower(), 1)
+            start = int(m.group(2)) * 12 + start_month - 1
+            if m.group(5):
+                end = today.year * 12 + today.month - 1
+            else:
+                end = int(m.group(4)) * 12 + _MONTHS.get((m.group(3) or "")[:3].lower(), 12) - 1
+            if end >= start:
+                intervals.append((start, end))
+    if not intervals:
+        return None, None
+    intervals.sort()
+    total, (cur_start, cur_end) = 0, intervals[0]
+    for start, end in intervals[1:]:
+        if start <= cur_end + 1:
+            cur_end = max(cur_end, end)
+        else:
+            total += cur_end - cur_start + 1
+            cur_start, cur_end = start, end
+    total += cur_end - cur_start + 1
+    return round(total / 12, 1), "calculated from your job dates"
+
+
+def _fmt_years(years) -> str:
+    return f"{years:g}"
+
+
+def judge_years(requirement: dict, years, source) -> dict:
+    """Compare the resume's years with the job's range. Within a year is a full match; bigger gaps lose credit
+    in proportion. Extra years only count against you when the job states an upper limit."""
+    low, high = requirement.get("min_years") or 0, requirement.get("max_years")
+    asked = f"{_fmt_years(low)}–{_fmt_years(high)} years" if high else f"{_fmt_years(low)}+ years"
+    if years is None:
+        return {"status": "partial", "credit": 0.5, "evidence": "",
+                "reason": "We couldn't find your total years of experience. State it in your summary, e.g. "
+                          "\"6+ years of experience\"."}
+    evidence = f"About {_fmt_years(years)} years ({source})"
+    if years + YEARS_TOLERANCE >= low and (high is None or years - YEARS_TOLERANCE <= high):
+        return {"status": "met", "credit": 1.0, "evidence": evidence,
+                "reason": f"The job asks for {asked}; your resume shows about {_fmt_years(years)}."}
+    if years + YEARS_TOLERANCE < low:
+        credit = round(years / low, 2) if low else 0.0
+        return {"status": "partial" if credit > 0 else "not_met", "credit": credit, "evidence": evidence,
+                "reason": f"The job asks for {asked}; your resume shows about {_fmt_years(years)} — "
+                          f"{_fmt_years(round(low - years, 1))} years short."}
+    credit = round(high / years, 2)
+    return {"status": "partial", "credit": credit, "evidence": evidence,
+            "reason": f"The job targets {asked}; your resume shows about {_fmt_years(years)}, which may read as "
+                      "overqualified for this level."}
+
+# ---- judging the other requirements (AI, with verified evidence)
+
+def _normalize_for_match(text: str) -> str:
+    return re.sub(r"[^a-z0-9%+#/.]+", " ", (text or "").lower()).strip()
+
+
+def evidence_in_resume(evidence: str, resume_text: str) -> bool:
+    """True when the quoted evidence really appears in the resume (exactly, or as a near-verbatim line)."""
+    quote = _normalize_for_match(evidence)
+    if len(quote) < 4:
+        return False
+    if quote in _normalize_for_match(resume_text):
+        return True
+    # Near-verbatim: at least 85% of the quote's words appear in one resume line ("&" vs "and", trimmed phrasing).
+    words = quote.split()
+    if len(words) < 3:
+        return False
+    for line in (resume_text or "").splitlines():
+        line_words = set(_normalize_for_match(line).split())
+        if sum(word in line_words for word in words) / len(words) >= 0.85:
+            return True
+    return False
+
+
+def requirement_cache_key(resume_text: str, requirements: list[dict]) -> str:
+    return hashlib.sha256(((resume_text or "") + json.dumps(requirements, sort_keys=True)).encode()).hexdigest()
+
+
+def evaluate_requirements(resume_text: str, requirements: list[dict], cache: dict | None = None) -> dict:
+    """
+    Score a resume against the job's requirements like a recruiter's scorecard. Years are checked in code; the
+    rest are judged by the AI (temperature 0), which must quote the resume line that proves each match — quotes
+    that can't be found in the resume are downgraded. `cache` (e.g. per user session) keeps repeat checks of the
+    same resume and job identical.
+    """
+    if not requirements:
+        return {"score": None, "items": [], "years": None, "years_source": None}
+    cache_key = requirement_cache_key(resume_text, requirements)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+
+    years, years_source = resume_years(resume_text)
+    to_judge = [r for r in requirements if r["category"] != "experience_years"]
+    judged = {}
+    if to_judge:
+        listing = "\n".join(f"{r['id']} [{r['importance']}, {r['category']}]: {r['text']}" for r in to_judge)
+        prompt = f"""
+    You are a fair, experienced recruiter screening this resume against a job's requirements. Judge by MEANING, not
+    exact words: related technologies, equivalent titles, and demonstrated work all count. For example, building
+    and scaling REST APIs demonstrates backend fundamentals, and "Postgres" is PostgreSQL.
+
+    For each requirement, decide:
+    - "met": the resume clearly demonstrates it.
+    - "partial": related or weaker evidence (adjacent technology, less depth, only implied).
+    - "not_met": nothing in the resume supports it. Never assume skills the resume doesn't show.
+    Soft skills count only with concrete evidence (e.g. "mentored 3 engineers" shows mentoring).
+
+    "evidence" must be copied word for word from the resume (one line or phrase, max 25 words); use "" when not_met.
+    "reason" is one short sentence (max 20 words) a candidate can act on.
+
+    Requirements:
+    {listing}
+
+    Resume:
+    {resume_text}
+
+    Return ONLY JSON (no prose, no markdown fences):
+    {{"results": [{{"id": "r1", "status": "met", "evidence": "", "reason": ""}}]}}
+    """
+        items = parse_json_object(call_llm(prompt, temperature=0)).get("results")
+        judged = {str(i.get("id")): i for i in items if isinstance(i, dict)} if isinstance(items, list) else {}
+
+    evaluated = []
+    for requirement in requirements:
+        if requirement["category"] == "experience_years":
+            verdict = judge_years(requirement, years, years_source)
+        else:
+            raw = judged.get(requirement["id"], {})
+            status = raw.get("status") if raw.get("status") in STATUS_CREDIT else "not_met"
+            evidence = str(raw.get("evidence") or "").strip()
+            reason = str(raw.get("reason") or "").strip() or ("Not assessed — try again." if not raw else "")
+            if status != "not_met" and not evidence_in_resume(evidence, resume_text):
+                status = "partial" if status == "met" else "not_met"
+                reason = (reason + " " if reason else "") + "(We couldn't find the quoted evidence in your resume.)"
+                evidence = ""
+            verdict = {"status": status, "credit": STATUS_CREDIT[status], "evidence": evidence, "reason": reason}
+        weight = SOFT_SKILL_WEIGHT if requirement["category"] == "soft_skill" else IMPORTANCE_WEIGHT[requirement["importance"]]
+        evaluated.append({**requirement, **verdict, "weight": weight})
+
+    total = sum(item["weight"] for item in evaluated)
+    score = round(100 * sum(item["weight"] * item["credit"] for item in evaluated) / total) if total else None
+    result = {"score": score, "items": evaluated, "years": years, "years_source": years_source}
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def gap_explanation(job_description, job_keywords, covered, missing) -> str:
@@ -948,18 +1185,20 @@ def interview_prep_agent(user_request, final_resume_text):
 # COMPARE JOBS (on demand)
 #----------------------
 
-def compare_jobs(resume_text, skills, job_descriptions, current_role=""):
+def compare_jobs(resume_text, skills, job_descriptions, current_role="", eval_cache=None):
     """Score one resume against several job descriptions (same scoring as the main pipeline), best fit first."""
     jobs = [(i, jd.strip()) for i, jd in enumerate(job_descriptions) if jd and jd.strip()]
 
     def evaluate(item):
         index, jd = item
         request = {"resume_text": resume_text, "job_description": jd, "skills": skills, "current_role": current_role}
-        return {"index": index, "job_description": jd, **ats_agent(request)}
+        requirement_match = evaluate_requirements(resume_text, extract_job_requirements(jd), cache=eval_cache)
+        return {"index": index, "job_description": jd, **ats_agent(request), "requirement_match": requirement_match}
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(evaluate, jobs))
-    return sorted(results, key=lambda r: r["ats_score"], reverse=True)
+    # Best fit first: requirement match (the recruiter's view), then ATS match as the tie-breaker.
+    return sorted(results, key=lambda r: (r["requirement_match"]["score"] or -1, r["ats_score"]), reverse=True)
 
 #----------------------
 # RESUME EDIT HELPERS
@@ -1000,7 +1239,8 @@ def add_skill_to_resume(resume_text: str, skill: str) -> str:
 
 PIPELINE_STEPS = [
     ("Profile Analyzer", "Reads your background and determines your experience level and domain."),
-    ("ATS Match", "Scores your resume against the job (semantic RAG + keyword matching) and finds the gaps."),
+    ("Requirement Analysis", "Breaks the job into requirements and checks each one against your resume, like a recruiter's scorecard."),
+    ("ATS Match", "Scores the job's keywords and semantic similarity (RAG), the way ATS software searches."),
     ("Resume Writer", "Rewrites your resume for the job's requirements and terminology, never inventing experience."),
     ("Human Optimizer", "Polishes the draft so it reads naturally, not like AI-generated text."),
     ("Completeness Check", "A guardrail that flags dropped jobs, rejects broken AI output, and keeps the higher-scoring version."),
@@ -1042,7 +1282,9 @@ def orchestrator(user_request, request_id, progress_callback=None):
         notify("Analyzing your profile and ATS gaps...")
         analyzer_future = pool.submit(analyzer_agent, user_request, request_id)
         cover_letter_future = pool.submit(cover_letter_agent, user_request, matched_chunks)
-        ats_output = ats_agent(user_request, matched_chunks)
+        ats_output = ats_agent(user_request, matched_chunks)  # also extracts (and caches) the job's requirements
+        requirements = extract_job_requirements(job_description)
+        requirements_before_future = pool.submit(evaluate_requirements, resume_text or "", requirements)
 
         notify("Writing your tailored resume...")
         resume_writer_output = resume_writer_agent(
@@ -1088,6 +1330,7 @@ def orchestrator(user_request, request_id, progress_callback=None):
         notify("Reviewing and building your recruiter snapshot...")
         reviewer_future = pool.submit(reviewer_agent, final_resume_text)
         snapshot_future = pool.submit(recruiter_snapshot_agent, user_request, final_resume_text)
+        requirements_after_future = pool.submit(evaluate_requirements, final_resume_text, requirements)
 
         ats_output["before"] = {k: ats_output[k] for k in ("ats_score", "keyword_score", "semantic_score")}
         ats_output["after"] = {"ats_score": after["overall"], "keyword_score": after["keyword"], "semantic_score": after["semantic"]}
@@ -1102,6 +1345,8 @@ def orchestrator(user_request, request_id, progress_callback=None):
         cover_letter_output = cover_letter_future.result()
         reviewer_output = reviewer_future.result()
         snapshot_output = snapshot_future.result()
+        requirement_match = {"requirements": requirements, "before": requirements_before_future.result(),
+                             "after": requirements_after_future.result()}
 
     execution_time = round(time.time() - start, 2)
     log_event(f"{request_id}: Orchestrator finished in {execution_time}s")
@@ -1118,6 +1363,7 @@ def orchestrator(user_request, request_id, progress_callback=None):
             "human_optimizer": human_optimizer_output,
             "reviewer": reviewer_output,
             "recruiter_snapshot": snapshot_output,
+            "requirement_match": requirement_match,
             "cover_letter": cover_letter_output,
             "completeness_check": completeness_output,
         },
