@@ -70,7 +70,7 @@ REQUEST = {
 }
 
 
-def fake_llm(prompt: str) -> str:
+def fake_llm(prompt: str, **kwargs) -> str:
     """Route each agent's prompt to a canned response."""
     if "candidate_level" in prompt:
         return '```json\n{"candidate_level": "Mid-Level", "primary_domain": "Backend", "years_experience": 5}\n```'
@@ -111,3 +111,11 @@ def pipeline(monkeypatch):
     monkeypatch.setattr(main, "call_llm", fake_llm)
     monkeypatch.setattr(main, "embedding_model", FakeEmbedder())
     return main
+
+
+@pytest.fixture(autouse=True)
+def fresh_keyword_cache():
+    """Each test starts with an empty job-keyword cache so fakes aren't shadowed by earlier tests."""
+    main._JOB_KEYWORD_CACHE.clear()
+    yield
+    main._JOB_KEYWORD_CACHE.clear()

@@ -586,8 +586,10 @@ if "last_result" in st.session_state and "docs" in st.session_state:
             st.markdown("**Now included after tailoring**")
             chips(added, "cl-chip-good")
         explanation = ats_data.get("explanation", "")
-        if explanation:
-            st.markdown(f"**What held your original score back**\n\n{explanation}")
+        if ats_data.get("keyword_source") == "skills" and request.get("job_description"):
+            st.info(explanation)
+        elif explanation:
+            st.markdown(f"**Your original resume vs. this job**\n\n{explanation}")
         if still_missing:
             picked = st.pills(
                 "**Still missing** — click any skill you genuinely have to add it to your resume",
@@ -599,8 +601,11 @@ if "last_result" in st.session_state and "docs" in st.session_state:
                 st.rerun()
             st.caption("CareerLoom never adds skills on its own. Only add a skill here if you genuinely have it — "
                        "recruiters may ask about it in an interview.")
-        with st.expander("Raw agent output"):
-            st.code(ats_data.get("llm_feedback", ""), language=None)
+        if job_keywords:
+            with st.expander(f"The {len(job_keywords)} key terms used for scoring"):
+                st.caption("Extracted once from the job description, so this job is scored against the same list "
+                           "everywhere in CareerLoom, including Compare jobs.")
+                chips(job_keywords)
 
     with tab_review:
         if not suggestions:

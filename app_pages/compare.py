@@ -130,9 +130,9 @@ if results:
             if action.button("Tailor for this job", key=f"tailor_job_{r['index']}", width="stretch"):
                 st.session_state.job_description_area = r["job_description"]
                 st.switch_page(st.session_state.pages["tailor"])
-            if r.get("job_keywords"):
-                st.caption(f"Covers {len(r['covered_keywords'])} of {len(r['job_keywords'])} key terms.")
-            if r.get("explanation"):
+            if r.get("keyword_source") == "skills":
+                st.info(r["explanation"])
+            elif r.get("explanation"):
                 st.markdown(r["explanation"])
             if r.get("covered_keywords"):
                 st.markdown("**You have**")

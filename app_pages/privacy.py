@@ -23,6 +23,8 @@ st.markdown(f"""
 
 ### What we don't do
 - We don't store your resume, job descriptions, or generated documents after your session.
+- To keep scores consistent, the server remembers the list of key terms extracted from each job description
+  (never anything from your resume) until the app restarts.
 - We don't write your resume or results into our logs. Logs contain only request IDs, processing steps, and scores.
 - We don't sell or share your data, and we don't require an account or email address.
 

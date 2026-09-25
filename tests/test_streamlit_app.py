@@ -68,7 +68,7 @@ def test_edit_mode_saves_changes(app):
 
 
 def test_llm_outage_shows_error_and_does_not_count(app, monkeypatch):
-    def down(prompt):
+    def down(prompt, **kwargs):
         raise main.LLMUnavailableError("down")
 
     monkeypatch.setattr(main, "call_llm", down)
@@ -78,7 +78,7 @@ def test_llm_outage_shows_error_and_does_not_count(app, monkeypatch):
 
 
 def test_broken_resume_output_shows_error(app, monkeypatch):
-    def broken(prompt):
+    def broken(prompt, **kwargs):
         if "Generate a professional ATS-friendly resume" in prompt:
             return "Please paste the resume text."
         return fake_llm(prompt)
@@ -120,7 +120,7 @@ def test_score_updates_live_after_editing(app):
 
 
 def test_interview_prep_on_demand(app, monkeypatch):
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "hiring manager preparing to interview" in prompt:
             return ('[{"category": "Technical", "question": "How did you scale your APIs?", "why_they_ask": "Core skill.", '
                     '"answer": {"situation": "TechCorp", "task": "Scale", "action": "FastAPI", "result": "1M+ requests"}}]')
@@ -135,7 +135,7 @@ def test_interview_prep_on_demand(app, monkeypatch):
 
 
 def test_cover_letter_tone_rewrite(app, monkeypatch):
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "cover letter" in prompt and "Warm, personable" in prompt:
             return "Hi there,\n\nFriendly letter.\n\nBest,\nJordan Lee"
         return fake_llm(prompt)
@@ -149,7 +149,7 @@ def test_cover_letter_tone_rewrite(app, monkeypatch):
 
 
 def test_busy_message_when_rate_limited(app, monkeypatch):
-    def busy(prompt):
+    def busy(prompt, **kwargs):
         raise main.LLMBusyError("limit", daily=True)
 
     monkeypatch.setattr(main, "call_llm", busy)
@@ -175,7 +175,7 @@ def test_other_pages_render(app, page):
 
 
 def test_compare_jobs_ranks_and_hands_off_to_tailor(app, monkeypatch):
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if '"job_keywords"' in prompt and "Rust" in prompt:
             return '{"job_keywords": ["Rust", "Go", "Kubernetes"], "explanation": "Different stack."}'
         return fake_llm(prompt)

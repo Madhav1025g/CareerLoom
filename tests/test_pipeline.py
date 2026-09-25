@@ -84,7 +84,7 @@ def test_orchestrator_reports_before_and_after_ats(pipeline):
 
 def test_optimizer_conversational_reply_falls_back_to_draft(pipeline, monkeypatch):
     # Regression for the live bug: the optimizer asked for the resume instead of returning one.
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "Human sounding" in prompt:
             return "I’m ready to rewrite your resume, but I need the original content first. Please paste the resume text you’d like me to work on."
         return fake_llm(prompt)
@@ -98,7 +98,7 @@ def test_optimizer_conversational_reply_falls_back_to_draft(pipeline, monkeypatc
 def test_optimizer_dropping_entries_falls_back_to_draft(pipeline, monkeypatch):
     shortened = TAILORED_RESUME.replace("Junior Developer | StartupX | Austin, TX | 2019 - 2020\n", "")
 
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         return shortened if "Human sounding" in prompt else fake_llm(prompt)
 
     monkeypatch.setattr(main, "call_llm", llm)
@@ -109,7 +109,7 @@ def test_optimizer_dropping_entries_falls_back_to_draft(pipeline, monkeypatch):
 def test_writer_retries_once_then_succeeds(pipeline, monkeypatch):
     calls = {"writer": 0}
 
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "Generate a professional ATS-friendly resume" in prompt:
             calls["writer"] += 1
             return "" if calls["writer"] == 1 else TAILORED_RESUME
@@ -121,7 +121,7 @@ def test_writer_retries_once_then_succeeds(pipeline, monkeypatch):
 
 
 def test_writer_failing_twice_raises(pipeline, monkeypatch):
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "Generate a professional ATS-friendly resume" in prompt:
             return "Please paste the resume text."
         return fake_llm(prompt)
@@ -178,7 +178,7 @@ def test_api_success(pipeline):
 def test_writer_and_optimizer_receive_job_description_and_gaps(pipeline, monkeypatch):
     prompts = {}
 
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "Generate a professional ATS-friendly resume" in prompt:
             prompts["writer"] = prompt
         elif "Human sounding" in prompt:
@@ -196,7 +196,7 @@ def test_writer_and_optimizer_receive_job_description_and_gaps(pipeline, monkeyp
 def test_ats_gap_analysis_runs_before_writer(pipeline, monkeypatch):
     order = []
 
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if '"job_keywords"' in prompt:
             order.append("ats")
         elif "Generate a professional ATS-friendly resume" in prompt:
@@ -224,7 +224,7 @@ def test_lower_scoring_polish_falls_back_to_draft(pipeline, monkeypatch):
     weaker = (TAILORED_RESUME.replace("FastAPI", "a web framework").replace("Docker", "containers")
               .replace("AWS", "the cloud").replace("Python", "a language"))
 
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         return weaker if "Human sounding" in prompt else fake_llm(prompt)
 
     monkeypatch.setattr(main, "call_llm", llm)
@@ -269,7 +269,7 @@ def test_ats_agent_extracts_deduplicated_job_keywords(pipeline):
 def test_writer_must_keep_existing_job_keywords(pipeline, monkeypatch):
     prompts = {}
 
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "Generate a professional ATS-friendly resume" in prompt:
             prompts["writer"] = prompt
         return fake_llm(prompt)
@@ -289,7 +289,7 @@ def test_tailoring_never_scores_below_original_when_keywords_kept(pipeline):
 def test_lost_keywords_are_reported(pipeline, monkeypatch):
     no_docker = TAILORED_RESUME.replace("Docker", "containers")
 
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if "Generate a professional ATS-friendly resume" in prompt or "Human sounding" in prompt:
             return no_docker
         return fake_llm(prompt)
@@ -342,7 +342,7 @@ def test_groq_rate_limit_becomes_busy_error(monkeypatch):
 
 
 def test_api_returns_429_when_busy(monkeypatch):
-    def busy(prompt):
+    def busy(prompt, **kwargs):
         raise main.LLMBusyError("busy")
 
     monkeypatch.setattr(main, "call_llm", busy)
@@ -351,7 +351,7 @@ def test_api_returns_429_when_busy(monkeypatch):
 
 
 def test_compare_jobs_ranks_best_fit_first(pipeline, monkeypatch):
-    def llm(prompt):
+    def llm(prompt, **kwargs):
         if '"job_keywords"' in prompt and "Rust" in prompt:
             return '{"job_keywords": ["Rust", "Go", "Kubernetes"], "explanation": "Different stack."}'
         return fake_llm(prompt)
@@ -366,6 +366,56 @@ def test_compare_jobs_ranks_best_fit_first(pipeline, monkeypatch):
 @pytest.mark.parametrize("tone", list(main.COVER_LETTER_TONES))
 def test_cover_letter_tone_in_prompt(pipeline, monkeypatch, tone):
     prompts = []
-    monkeypatch.setattr(main, "call_llm", lambda p: prompts.append(p) or fake_llm(p))
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: prompts.append(p) or fake_llm(p))
     main.cover_letter_agent(dict(REQUEST), None, tone)
     assert main.COVER_LETTER_TONES[tone] in prompts[0]
+
+
+# ---------------------------------------------------------------- consistent job keywords
+
+def test_same_job_gets_same_keywords_across_calls_and_pages(pipeline, monkeypatch):
+    calls = []
+
+    def llm(prompt, **kwargs):
+        if '"job_keywords"' in prompt:
+            calls.append(kwargs.get("temperature"))
+        return fake_llm(prompt)
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    tailor = main.ats_agent(dict(REQUEST))
+    compared = main.compare_jobs(SOURCE_RESUME, REQUEST["skills"], [REQUEST["job_description"], "Rust, Go"])
+    same_job = next(r for r in compared if r["job_description"] == REQUEST["job_description"])
+    assert same_job["job_keywords"] == tailor["job_keywords"]
+    assert same_job["keyword_score"] == tailor["keyword_score"]
+    assert same_job["ats_score"] == tailor["ats_score"]
+    assert calls.count(0) == 2  # extracted once per distinct job, always at temperature 0
+
+
+def test_keyword_extraction_sees_only_the_job_description(pipeline, monkeypatch):
+    prompts = []
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: prompts.append(p) or fake_llm(p))
+    main.extract_job_keywords(REQUEST["job_description"])
+    assert "TechCorp" not in prompts[0]  # the resume must not bias which terms are picked
+
+
+def test_keyword_extraction_retries_then_falls_back_to_skills(pipeline, monkeypatch):
+    replies = iter(["not json", '{"job_keywords": []}'])
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: next(replies) if '"job_keywords"' in p else fake_llm(p))
+    ats = main.ats_agent(dict(REQUEST))
+    assert ats["keyword_source"] == "skills"
+    assert ats["job_keywords"] == []
+    assert "couldn't read this job's key terms" in ats["explanation"]
+    assert main._JOB_KEYWORD_CACHE == {}  # failures are not cached
+
+
+def test_keyword_extraction_retry_succeeds(pipeline, monkeypatch):
+    replies = iter(["oops", '{"job_keywords": ["Python", "AWS"]}'])
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: next(replies))
+    assert main.extract_job_keywords("Needs Python and AWS") == ["Python", "AWS"]
+
+
+def test_gap_explanation_matches_the_numbers():
+    text = main.gap_explanation("jd", ["Python", "AWS", "Go"], ["Python", "AWS"], ["Go"])
+    assert text == "Your resume covers 2 of 3 key terms from this job. Missing: Go."
+    assert "all 2 key terms" in main.gap_explanation("jd", ["A", "B"], ["A", "B"], [])
+    assert "Add a job description" in main.gap_explanation(None, [], [], [])

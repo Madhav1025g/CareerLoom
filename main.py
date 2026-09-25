@@ -4,6 +4,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import logging
 import os
@@ -168,7 +169,7 @@ def _rate_limit_info(exc):
     return limited, daily
 
 
-def call_llm(prompt):
+def call_llm(prompt, temperature=0.4):
     rate_limit = None  # (daily,) when the last provider failure was a rate limit
     # Groq path (free) — used when LLM_PROVIDER=groq and a key is configured
     if LLM_PROVIDER == "groq" and groq_client is not None:
@@ -179,7 +180,7 @@ def call_llm(prompt):
                 model="openai/gpt-oss-20b",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4096,
-                temperature=0.4,
+                temperature=temperature,
                 reasoning_effort="low",
             )
             choice = response.choices[0]
@@ -210,7 +211,7 @@ def call_llm(prompt):
                 }
             ],
             max_tokens=4096,
-            temperature=0.4,
+            temperature=temperature,
         )
         content = (response.choices[0].message.content or "").strip()
     except Exception as exc:
@@ -511,65 +512,89 @@ def ats_breakdown(resume_text: str, job_description: str | None, skills: list[st
 # ATS OPTIMIZATION AGENT (RAG-aware)
 #------------------------
 
+# Job description hash -> extracted key terms. Derived from the job posting only (never the resume), so the
+# same job always gets the same list on every page and every run.
+_JOB_KEYWORD_CACHE: dict[str, list[str]] = {}
+_JOB_KEYWORD_CACHE_LIMIT = 256
+
+
+def extract_job_keywords(job_description: str | None) -> list[str]:
+    """The job's 10-20 key hard requirements, extracted once per job description (temperature 0, one retry)."""
+    job_description = (job_description or "").strip()
+    if not job_description:
+        return []
+    cache_key = hashlib.sha256(job_description.encode()).hexdigest()
+    if cache_key in _JOB_KEYWORD_CACHE:
+        return list(_JOB_KEYWORD_CACHE[cache_key])
+
+    prompt = f"""
+    You are an ATS (applicant tracking system) analyst. From the job description below, list the 10-20 most
+    important hard requirements a recruiter would search for: skills, tools, technologies, platforms,
+    methodologies, certifications, and domain terms. Copy each term exactly as the job description writes it,
+    keep each to 1-4 words, and exclude soft skills (e.g. "team player", "communication").
+
+    Job description:
+    {job_description[:JD_PROMPT_CHARS]}
+
+    Return ONLY JSON (no prose, no markdown fences):
+    {{"job_keywords": []}}
+    """
+
+    keywords = []
+    for attempt in range(2):
+        parsed = parse_json_object(call_llm(prompt, temperature=0))
+        raw = parsed.get("job_keywords") if isinstance(parsed.get("job_keywords"), list) else []
+        keywords = list(dict.fromkeys(str(k).strip() for k in raw if str(k).strip()))[:20]
+        if keywords:
+            break
+        log_event("Job keyword extraction returned nothing usable — retrying" if attempt == 0
+                  else "Job keyword extraction failed — falling back to the candidate's stated skills")
+
+    if keywords:
+        if len(_JOB_KEYWORD_CACHE) >= _JOB_KEYWORD_CACHE_LIMIT:
+            _JOB_KEYWORD_CACHE.pop(next(iter(_JOB_KEYWORD_CACHE)))
+        _JOB_KEYWORD_CACHE[cache_key] = keywords
+    return list(keywords)
+
+
+def gap_explanation(job_description, job_keywords, covered, missing) -> str:
+    """Plain-English summary built from the actual scoring lists, so it always agrees with the numbers."""
+    if not job_description:
+        return "Add a job description to see which of the job's key terms your resume covers."
+    if not job_keywords:
+        return ("We couldn't read this job's key terms this time, so the keyword score is based on the skills you "
+                "entered. Try generating again for a job-specific score.")
+    if not missing:
+        return f"Your resume covers all {len(job_keywords)} key terms from this job."
+    shown = ", ".join(missing[:6]) + (f", and {len(missing) - 6} more" if len(missing) > 6 else "")
+    return f"Your resume covers {len(covered)} of {len(job_keywords)} key terms from this job. Missing: {shown}."
+
+
 def ats_agent(user_request, matched_chunks=None):
     """
-    Extracts the job's key terms ONCE, so the original and tailored resumes are scored against the
-    same list. Which terms are covered or missing is then computed deterministically, not guessed.
+    Scores a resume against a job. The job's key terms come from extract_job_keywords (cached per job), so every
+    page and run uses the same list; which terms are covered or missing is computed deterministically.
     """
 
     log_event("ATS Agent Started")
 
     resume_text = user_request.get("resume_text") or ""
     job_description = (user_request.get("job_description") or "").strip()
-
-    if job_description:
-        task = f"""
-    1. "job_keywords": the 10-20 most important hard requirements in the job description below — skills, tools,
-       technologies, platforms, methodologies, certifications, and domain terms. Copy each term exactly as the
-       job description writes it, keep each to 1-4 words, and exclude soft skills (e.g. "team player").
-    2. "explanation": one or two plain-English sentences on the main gaps between the resume and the job,
-       naming specific missing tools/skills. If nothing significant is missing, say the resume covers the job well.
-
-    Job description:
-    {job_description[:JD_PROMPT_CHARS]}
-    """
-    else:
-        task = """
-    No job description was provided. Return "job_keywords": [] and an "explanation" naming any obviously
-    missing common skills relative to the candidate's stated skills and role.
-    """
-
-    prompt = f"""
-    You are an ATS (applicant tracking system) analyst. Produce:
-    {task}
-    Candidate's full resume:
-    {resume_text}
-
-    Candidate's stated skills: {', '.join(user_request['skills'])}
-
-    Return ONLY JSON (no prose, no markdown fences):
-    {{"job_keywords": [], "explanation": ""}}
-    """
-
-    output = call_llm(prompt)
-    parsed = parse_json_object(output)
-    raw_keywords = parsed.get("job_keywords") if isinstance(parsed.get("job_keywords"), list) else []
-    job_keywords = list(dict.fromkeys(str(k).strip() for k in raw_keywords if str(k).strip()))[:20]
-    explanation = parsed.get("explanation", "")
+    job_keywords = extract_job_keywords(job_description)
 
     scores = ats_breakdown(resume_text, job_description or None, user_request["skills"], job_keywords)
     log_event(f"ATS completed | keywords={len(job_keywords)} keyword_score={scores['keyword']} "
               f"semantic_score={scores['semantic']} final={scores['overall']}")
 
     return {
-        "llm_feedback": output,
         "ats_score": scores["overall"],
         "keyword_score": scores["keyword"],
         "semantic_score": scores["semantic"],
+        "keyword_source": "job" if job_keywords else "skills",
         "job_keywords": job_keywords,
         "covered_keywords": scores["covered"],
         "missing_keywords": scores["missing"],
-        "explanation": explanation,
+        "explanation": gap_explanation(job_description, job_keywords, scores["covered"], scores["missing"]),
     }
 
 #----------------------
