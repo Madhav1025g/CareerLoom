@@ -1,0 +1,16 @@
+{
+  "id": "overqualified",
+  "title": "Over the stated experience range",
+  "why": "15+ years against a '1-3 years' junior role must be partial (possible overqualification), not met.",
+  "request": {
+    "full_name": "Morgan Ellis",
+    "current_role": "Principal Frontend Engineer",
+    "skills": ["JavaScript", "React", "CSS", "TypeScript"],
+    "experience_years": 15,
+    "resume_text": "Morgan Ellis\nmorgan.ellis@example.com | Denver, CO\n\nPROFESSIONAL SUMMARY\nFrontend engineer with 15+ years of experience building web applications in JavaScript and React.\n\nEXPERIENCE\nPrincipal Frontend Engineer | Summit Media | Denver, CO | 2016 - 2025\n- Led a team of 8 engineers rebuilding the publishing platform in React and TypeScript\n- Established the company design system used by 30 product teams\nSenior Web Developer | Blue River Agency | Boulder, CO | 2010 - 2016\n- Built responsive marketing sites with JavaScript and CSS for 50+ clients\n\nSKILLS\nLanguages: JavaScript, TypeScript, HTML, CSS\nFrameworks: React\n\nEDUCATION\nB.A. Graphic Design | University of Colorado | 2009",
+    "job_description": "Junior Frontend Developer\n\nWe're hiring a junior developer with 1-3 years of experience in JavaScript, React, and CSS to build UI components under the guidance of senior engineers."
+  },
+  "expect": {
+    "years_status": "partial"
+  }
+}

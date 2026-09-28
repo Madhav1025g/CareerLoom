@@ -1,0 +1,18 @@
+{
+  "id": "strong_backend",
+  "title": "Strong match: senior backend engineer",
+  "why": "A clearly qualified candidate should score high, with years judged as met (7+ inside 2-10).",
+  "request": {
+    "full_name": "Priya Raman",
+    "current_role": "Senior Backend Engineer",
+    "skills": ["Python", "Go", "AWS", "Kafka", "PostgreSQL"],
+    "experience_years": 7,
+    "resume_text": "Priya Raman\npriya.raman@example.com | Seattle, WA\n\nPROFESSIONAL SUMMARY\nBackend engineer with 7+ years of experience building distributed services in Python and Go on AWS.\n\nEXPERIENCE\nSenior Backend Engineer | Northwind Logistics | Seattle, WA | Mar 2021 - Aug 2025\n- Designed an event-driven order pipeline on Kafka processing 40K events per second\n- Led migration of 12 Python services to Go, cutting p99 latency by 45%\n- Owned AWS infrastructure (ECS, RDS, SQS) for a platform serving 3M users\nBackend Engineer | Brightline Health | Portland, OR | Jan 2018 - Feb 2021\n- Built REST and gRPC APIs in Python for claims processing\n- Introduced PostgreSQL partitioning that reduced query times by 60%\n\nTECHNICAL SKILLS\nLanguages: Python, Go, SQL\nInfrastructure: AWS, Kafka, Docker, PostgreSQL\n\nEDUCATION\nB.S. Computer Engineering | Oregon State University | 2017",
+    "job_description": "Senior Backend Engineer\n\nWe are looking for an engineer with 2-10 years of industry software experience and strong backend engineering fundamentals. You will build distributed systems in Python or Go, run services on AWS, and design event-driven architectures. Kafka experience is preferred. Bachelor's degree in Computer Science or a related field."
+  },
+  "expect": {
+    "years_status": "met",
+    "requirements": [{"term": "Kafka", "status": ["met"]}],
+    "requirement_score_after": {"min": 70}
+  }
+}

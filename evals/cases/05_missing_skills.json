@@ -1,0 +1,22 @@
+{
+  "id": "missing_skills",
+  "title": "Missing required skills",
+  "why": "Kubernetes and Terraform are required but absent: both must be judged not met and must not be invented.",
+  "request": {
+    "full_name": "Sam Ortiz",
+    "current_role": "Frontend Engineer",
+    "skills": ["React", "TypeScript", "Jest"],
+    "experience_years": 5,
+    "resume_text": "Sam Ortiz\nsam.ortiz@example.com | San Diego, CA\n\nPROFESSIONAL SUMMARY\nFrontend engineer with 5 years of experience building React and TypeScript applications.\n\nEXPERIENCE\nFrontend Engineer | Pacific Commerce | San Diego, CA | Apr 2019 - May 2024\n- Built a React checkout flow that increased conversion by 9%\n- Migrated a 60K-line JavaScript codebase to TypeScript\n- Set up Jest testing standards adopted by 4 teams\n\nSKILLS\nLanguages: TypeScript, JavaScript\nFrameworks: React\nTesting: Jest\n\nEDUCATION\nB.S. Computer Science | San Diego State University | 2019",
+    "job_description": "Full-Stack Platform Engineer\n\nRequirements: 4+ years of experience, React and TypeScript, deploying services on Kubernetes, and managing infrastructure as code with Terraform. You will own features end to end, from UI to deployment."
+  },
+  "expect": {
+    "years_status": "met",
+    "requirements": [
+      {"term": "Kubernetes", "status": ["not_met"]},
+      {"term": "Terraform", "status": ["not_met"]},
+      {"term": "React", "status": ["met"]}
+    ],
+    "must_not_contain": ["Kubernetes", "Terraform"]
+  }
+}

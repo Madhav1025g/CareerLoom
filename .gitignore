@@ -20,3 +20,6 @@ resume_generator_logs*.txt
 Thumbs.db
 .vscode/
 .idea/
+
+# Eval run outputs (the committed baseline lives in evals/baseline.json)
+evals/results/

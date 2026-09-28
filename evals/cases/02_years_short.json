@@ -1,0 +1,17 @@
+{
+  "id": "years_short",
+  "title": "Under-qualified on years",
+  "why": "About 2 years of experience against '6+ years' must be judged partial, never met.",
+  "request": {
+    "full_name": "Alex Kim",
+    "current_role": "Software Engineer",
+    "skills": ["Java", "Spring Boot", "MySQL"],
+    "experience_years": 2,
+    "resume_text": "Alex Kim\nalex.kim@example.com | Austin, TX\n\nSUMMARY\nSoftware engineer focused on Java backend services.\n\nEXPERIENCE\nSoftware Engineer | Cedar Payments | Austin, TX | Jun 2022 - Aug 2024\n- Built Spring Boot microservices for payment reconciliation\n- Wrote MySQL reporting queries used by the finance team\n- Added integration tests that raised coverage from 55% to 80%\n\nSKILLS\nLanguages: Java, SQL\nFrameworks: Spring Boot\nDatabases: MySQL\n\nEDUCATION\nB.S. Computer Science | University of Texas at Austin | 2022",
+    "job_description": "Staff Software Engineer\n\nRequirements: 6+ years of professional software engineering experience, deep expertise in Java and Spring Boot, experience leading technical projects across teams, and designing high-availability systems. Experience mentoring engineers is preferred."
+  },
+  "expect": {
+    "years_status": "partial",
+    "requirement_score_after": {"max": 80}
+  }
+}

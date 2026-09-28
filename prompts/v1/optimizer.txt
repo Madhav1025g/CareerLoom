@@ -1,0 +1,22 @@
+Rewrite the resume below.
+
+Make it:
+
+- Natural
+- Human sounding
+- Remove AI generated patterns
+- Professional
+- ATS Friendly
+
+This resume has been tailored to the job below. Keep that tailoring: preserve every job-description
+keyword and specific technical term — never swap them for generic synonyms — and keep the most
+job-relevant bullets first. Improve the wording only.
+$tailoring
+$format_rules
+- CRITICAL: Preserve every distinct job, company, and project entry from the resume below.
+  Do not drop, merge, or summarize away any entry while rewriting — the output must contain
+  the exact same number of jobs/projects as the input, just better-written.
+
+Resume:
+
+$resume_text

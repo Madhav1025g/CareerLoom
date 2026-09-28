@@ -1,0 +1,16 @@
+{
+  "id": "messy_pdf_text",
+  "title": "Messy text extracted from a PDF",
+  "why": "Broken line wraps and odd bullets from PDF extraction must still produce a complete, well-formatted resume.",
+  "request": {
+    "full_name": "Chris Nguyen",
+    "current_role": "Data Engineer",
+    "skills": ["Spark", "Airflow", "SQL", "Python"],
+    "experience_years": 4,
+    "resume_text": "CHRIS NGUYEN\nchris.nguyen@example.com  •  Chicago, IL\nEXPERIENCE\nData Engineer   Lakeview Analytics   Chicago, IL   Jan 2021 – Dec\n2024\n• Built Spark jobs that process 2 TB of clickstream\ndata daily\n• Orchestrated 45 Airflow DAGs\nfor reporting pipelines\n• Reduced warehouse costs by 30% by rewriting SQL\nmodels\nJunior Data Analyst   Midtown Retail   Chicago, IL   2019 – 2020\n• Wrote SQL reports for store\nmanagers\nSKILLS   Python, SQL, Spark, Airflow, Snowflake\nEDUCATION   B.S. Information Systems, DePaul University, 2019",
+    "job_description": "Data Engineer\n\nWe need a data engineer with 3+ years of experience building batch pipelines with Spark and Airflow, strong SQL, and Python. Snowflake experience is a plus."
+  },
+  "expect": {
+    "requirements": [{"term": "Spark", "status": ["met", "partial"]}]
+  }
+}

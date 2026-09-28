@@ -4,6 +4,9 @@ from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
+from pathlib import Path
+from string import Template
 import hashlib
 import json
 import logging
@@ -169,19 +172,25 @@ def _rate_limit_info(exc):
     return limited, daily
 
 
-def call_llm(prompt, temperature=0.4):
+GROQ_MODEL = "openai/gpt-oss-20b"
+
+
+def call_llm(prompt, temperature=0.4, model=None):
     rate_limit = None  # (daily,) when the last provider failure was a rate limit
     # Groq path (free) — used when LLM_PROVIDER=groq and a key is configured
     if LLM_PROVIDER == "groq" and groq_client is not None:
         try:
             # gpt-oss is a reasoning model: hidden reasoning tokens count against max_tokens. Low effort
             # leaves room for the actual resume; max_tokens stays small enough for Groq's free-tier TPM limit.
+            model = model or GROQ_MODEL
+            # reasoning_effort only exists for reasoning models (gpt-oss); other models reject it.
+            reasoning = {"reasoning_effort": "low"} if model.startswith("openai/gpt-oss") else {}
             response = groq_client.chat.completions.create(
-                model="openai/gpt-oss-20b",
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4096,
                 temperature=temperature,
-                reasoning_effort="low",
+                **reasoning,
             )
             choice = response.choices[0]
             content = (choice.message.content or "").strip()
@@ -881,73 +890,55 @@ def is_usable_resume(text: str, source_text: str | None) -> bool:
 
 JD_PROMPT_CHARS = 4000  # keeps prompts within Groq's free-tier tokens-per-minute limit
 
+# Tailoring prompts live in prompts/<version>/*.txt so versions can be compared with the eval harness (evals/).
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+PROMPT_VERSION = os.getenv("CAREERLOOM_PROMPT_VERSION", "v1")
 
-def tailoring_section(user_request, missing_keywords=None, covered_keywords=None) -> str:
+
+@lru_cache(maxsize=None)
+def _prompt_template(version: str, name: str) -> Template:
+    return Template((PROMPTS_DIR / version / f"{name}.txt").read_text(encoding="utf-8"))
+
+
+def render_prompt(name: str, version: str | None = None, **values) -> str:
+    """Fill a versioned prompt. Values may contain "$" (e.g. salaries) — only the template is parsed."""
+    return _prompt_template(version or PROMPT_VERSION, name).substitute(**values)
+
+
+def tailoring_section(user_request, missing_keywords=None, covered_keywords=None, prompt_version=None) -> str:
     """Job-targeting instructions shared by the writer and optimizer, with strict no-fabrication rules."""
     job_description = (user_request.get("job_description") or "").strip()
     if not job_description:
-        return f"""
-    No job description was given — tailor the resume to a {user_request['current_role'] or 'role matching the candidate'} position.
-    """
-    gaps = ", ".join(map(str, missing_keywords or [])) or "none identified"
-    keep = ", ".join(map(str, covered_keywords or [])) or "none identified"
-    return f"""
-    TARGET JOB DESCRIPTION (tailor the resume to THIS role):
-    {job_description[:JD_PROMPT_CHARS]}
-
-    Job keywords the original resume ALREADY contains — every one MUST appear, spelled exactly like this: {keep}
-    Job keywords the original resume is missing: {gaps}
-
-    Tailoring rules:
-    - Open the PROFESSIONAL SUMMARY with the target role's title and the candidate's strengths most relevant to it.
-    - Mirror the job description's exact terminology wherever the candidate's real experience matches
-      (e.g. if the job says "CI/CD" and the resume says "automated deployments", write "CI/CD (automated deployments)").
-    - Within each job, put the most job-relevant bullets first. Order skill categories by relevance to the job.
-    - For each missing keyword: include it ONLY if the source resume shows the candidate genuinely has
-      that experience, possibly under different wording. NEVER add a skill, tool, certification, employer, title,
-      or metric that the source resume does not support. Honesty matters more than the score.
-    """
+        return render_prompt("tailoring_no_jd", prompt_version,
+                             role=user_request.get("current_role") or "role matching the candidate")
+    return render_prompt(
+        "tailoring", prompt_version,
+        job_description=job_description[:JD_PROMPT_CHARS],
+        keep=", ".join(map(str, covered_keywords or [])) or "none identified",
+        gaps=", ".join(map(str, missing_keywords or [])) or "none identified",
+    )
 
 
-def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None, covered_keywords=None):
+def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None, covered_keywords=None,
+                        prompt_version=None):
 
     log_event("Resume Writer Agent Started")
 
     full_resume_text = user_request.get("resume_text", "")
+    emphasis_section = (render_prompt("emphasis", prompt_version, chunks="\n".join(matched_chunks))
+                        if matched_chunks else "")
 
-    emphasis_section = ""
-    if matched_chunks:
-        emphasis_section = f"""
-    The following excerpts from the candidate's resume are especially relevant to this job —
-    give them extra emphasis and prioritize them where natural, but this is guidance only:
-    {chr(10).join(matched_chunks)}
-    """
-
-    prompt = f"""
-    Generate a professional ATS-friendly resume.
-
-    Name:
-    {user_request['full_name']}
-
-    Current Role:
-    {user_request['current_role']}
-
-    Skills:
-    {', '.join(user_request['skills'])}
-
-    Experience:
-    {user_request['experience_years']} years
-
-    Full source resume content (this is the complete and only source of truth — use ALL of it):
-    {full_resume_text}
-    {emphasis_section}
-    {tailoring_section(user_request, missing_keywords, covered_keywords)}
-    {RESUME_FORMAT_RULES}
-    - CRITICAL: Include every distinct job, company, and project mentioned in the full source content above,
-      with their real company names and dates exactly as given. NEVER write placeholders like "[Not Provided]"
-      or "[Company Name]" — if a detail is in the source text, use it verbatim; do not omit, merge, or
-      genericize any entry, even if there are many.
-    """
+    prompt = render_prompt(
+        "writer", prompt_version,
+        full_name=user_request["full_name"],
+        current_role=user_request["current_role"],
+        skills=", ".join(user_request["skills"]),
+        experience_years=user_request["experience_years"],
+        resume_text=full_resume_text,
+        emphasis=emphasis_section,
+        tailoring=tailoring_section(user_request, missing_keywords, covered_keywords, prompt_version),
+        format_rules=RESUME_FORMAT_RULES,
+    )
 
     resume = call_llm(prompt)
     if not is_usable_resume(resume, full_resume_text):
@@ -969,34 +960,16 @@ def resume_writer_agent(user_request, matched_chunks=None, missing_keywords=None
 # HUMAN OPTIMIZER AGENT
 #----------------------
 
-def human_optimizer_agent(user_request, resume_text, keep_keywords=None):
+def human_optimizer_agent(user_request, resume_text, keep_keywords=None, prompt_version=None):
 
     log_event("Human Optimizer Agent Started")
 
-    prompt = f"""
-    Rewrite the resume below.
-
-    Make it:
-
-    - Natural
-    - Human sounding
-    - Remove AI generated patterns
-    - Professional
-    - ATS Friendly
-
-    This resume has been tailored to the job below. Keep that tailoring: preserve every job-description
-    keyword and specific technical term — never swap them for generic synonyms — and keep the most
-    job-relevant bullets first. Improve the wording only.
-    {tailoring_section(user_request, covered_keywords=keep_keywords)}
-    {RESUME_FORMAT_RULES}
-    - CRITICAL: Preserve every distinct job, company, and project entry from the resume below.
-      Do not drop, merge, or summarize away any entry while rewriting — the output must contain
-      the exact same number of jobs/projects as the input, just better-written.
-
-    Resume:
-
-    {resume_text}
-    """
+    prompt = render_prompt(
+        "optimizer", prompt_version,
+        tailoring=tailoring_section(user_request, covered_keywords=keep_keywords, prompt_version=prompt_version),
+        format_rules=RESUME_FORMAT_RULES,
+        resume_text=resume_text,
+    )
 
     optimized_resume = call_llm(prompt)
 
@@ -1250,7 +1223,13 @@ PIPELINE_STEPS = [
 ]
 
 
-def orchestrator(user_request, request_id, progress_callback=None):
+def orchestrator(user_request, request_id, progress_callback=None, prompt_version=None, extras=True,
+                 eval_cache=None):
+    """
+    Run the pipeline. The eval harness passes prompt_version (which prompts/ folder to use), extras=False (skip
+    the analyzer, cover letter, reviewer, and snapshot, which it doesn't grade, to save API quota), and eval_cache
+    (reuse requirement verdicts for the same resume + job across prompt versions).
+    """
     log_event(f"{request_id}: Orchestrator started")
     start = time.time()
 
@@ -1280,23 +1259,24 @@ def orchestrator(user_request, request_id, progress_callback=None):
     # ATS -> writer -> optimizer must run in order: the writer targets the gaps the ATS agent finds.
     with ThreadPoolExecutor(max_workers=3) as pool:
         notify("Analyzing your profile and ATS gaps...")
-        analyzer_future = pool.submit(analyzer_agent, user_request, request_id)
-        cover_letter_future = pool.submit(cover_letter_agent, user_request, matched_chunks)
+        analyzer_future = pool.submit(analyzer_agent, user_request, request_id) if extras else None
+        cover_letter_future = pool.submit(cover_letter_agent, user_request, matched_chunks) if extras else None
         ats_output = ats_agent(user_request, matched_chunks)  # also extracts (and caches) the job's requirements
         requirements = extract_job_requirements(job_description)
-        requirements_before_future = pool.submit(evaluate_requirements, resume_text or "", requirements)
+        requirements_before_future = pool.submit(evaluate_requirements, resume_text or "", requirements, eval_cache)
 
         notify("Writing your tailored resume...")
         resume_writer_output = resume_writer_agent(
             user_request, matched_chunks=matched_chunks, missing_keywords=ats_output["missing_keywords"],
-            covered_keywords=ats_output["covered_keywords"],
+            covered_keywords=ats_output["covered_keywords"], prompt_version=prompt_version,
         )
         draft_text = resume_writer_output["generated_resume"]
 
         notify("Polishing the final version...")
         # The optimizer must keep every job keyword the draft achieved, not just the original's.
         draft_keywords = keyword_coverage(draft_text, ats_output["job_keywords"])["covered"]
-        human_optimizer_output = human_optimizer_agent(user_request, draft_text, keep_keywords=draft_keywords)
+        human_optimizer_output = human_optimizer_agent(user_request, draft_text, keep_keywords=draft_keywords,
+                                                       prompt_version=prompt_version)
         polished_text = human_optimizer_output["human_friendly_resume"]
 
         notify("Checking content and picking the strongest version...")
@@ -1328,9 +1308,9 @@ def orchestrator(user_request, request_id, progress_callback=None):
             log_event(f"{request_id}: WARNING — {len(completeness_output['possibly_missing'])} entries possibly dropped")
 
         notify("Reviewing and building your recruiter snapshot...")
-        reviewer_future = pool.submit(reviewer_agent, final_resume_text)
-        snapshot_future = pool.submit(recruiter_snapshot_agent, user_request, final_resume_text)
-        requirements_after_future = pool.submit(evaluate_requirements, final_resume_text, requirements)
+        reviewer_future = pool.submit(reviewer_agent, final_resume_text) if extras else None
+        snapshot_future = pool.submit(recruiter_snapshot_agent, user_request, final_resume_text) if extras else None
+        requirements_after_future = pool.submit(evaluate_requirements, final_resume_text, requirements, eval_cache)
 
         ats_output["before"] = {k: ats_output[k] for k in ("ats_score", "keyword_score", "semantic_score")}
         ats_output["after"] = {"ats_score": after["overall"], "keyword_score": after["keyword"], "semantic_score": after["semantic"]}
@@ -1341,10 +1321,10 @@ def orchestrator(user_request, request_id, progress_callback=None):
             log_event(f"{request_id}: WARNING — tailoring lost {len(ats_output['lost_keywords'])} job keywords")
 
         notify("Finishing up...")
-        analyzer_output = analyzer_future.result()
-        cover_letter_output = cover_letter_future.result()
-        reviewer_output = reviewer_future.result()
-        snapshot_output = snapshot_future.result()
+        analyzer_output = analyzer_future.result() if extras else None
+        cover_letter_output = cover_letter_future.result() if extras else None
+        reviewer_output = reviewer_future.result() if extras else None
+        snapshot_output = snapshot_future.result() if extras else None
         requirement_match = {"requirements": requirements, "before": requirements_before_future.result(),
                              "after": requirements_after_future.result()}
 

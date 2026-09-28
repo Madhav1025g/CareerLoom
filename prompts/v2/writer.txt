@@ -1,0 +1,23 @@
+Generate a professional ATS-friendly resume.
+
+Name:
+$full_name
+
+Current Role:
+$current_role
+
+Skills:
+$skills
+
+Experience:
+$experience_years years
+
+Full source resume content (this is the complete and only source of truth — use ALL of it):
+$resume_text
+$emphasis
+$tailoring
+$format_rules
+- CRITICAL: Include every distinct job, company, and project mentioned in the full source content above,
+  with their real company names and dates exactly as given. NEVER write placeholders like "[Not Provided]"
+  or "[Company Name]" — if a detail is in the source text, use it verbatim; do not omit, merge, or
+  genericize any entry, even if there are many.

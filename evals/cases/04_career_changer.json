@@ -1,0 +1,18 @@
+{
+  "id": "career_changer",
+  "title": "Career changer: teacher to data analyst",
+  "why": "Transferable skills should count, but tools the candidate never used (Tableau) must stay missing and never be added.",
+  "request": {
+    "full_name": "Dana Brooks",
+    "current_role": "Mathematics Teacher",
+    "skills": ["Excel", "Python", "Statistics"],
+    "experience_years": 8,
+    "resume_text": "Dana Brooks\ndana.brooks@example.com | Columbus, OH\n\nSUMMARY\nMathematics teacher with 8 years of experience, transitioning into data analysis.\n\nEXPERIENCE\nMathematics Teacher | Riverside High School | Columbus, OH | Aug 2016 - Jun 2024\n- Tracked performance data for 150 students per year in Excel and presented trends to school leadership\n- Built a spreadsheet model that identified at-risk students, improving pass rates by 12%\n- Taught statistics and probability to 11th and 12th grade students\n\nPROJECTS\nPython for Data Analysis course project | 2024\n- Analyzed a public housing dataset with Python (pandas) and summarized findings in a report\n\nSKILLS\nTools: Excel, Python (pandas)\nKnowledge: Statistics, data presentation\n\nEDUCATION\nB.S. Mathematics | Ohio State University | 2016",
+    "job_description": "Data Analyst\n\nYou will build dashboards in Tableau, write SQL queries against our warehouse, analyze data with Python, and present insights to stakeholders. Requirements: SQL, Tableau, Python, strong statistics knowledge, and excellent communication with non-technical audiences."
+  },
+  "expect": {
+    "requirements": [{"term": "Tableau", "status": ["not_met"]}],
+    "must_not_contain": ["Tableau"],
+    "requirement_score_after": {"max": 75}
+  }
+}
