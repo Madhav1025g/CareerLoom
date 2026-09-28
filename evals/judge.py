@@ -3,9 +3,10 @@ import os
 
 import main
 
-# A different (and larger) model than the one that writes the resumes, so it isn't grading its own style.
-# Free on Groq with its own rate limits. Override with EVAL_JUDGE_MODEL if Groq retires it.
-JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "llama-3.3-70b-versatile")
+# A different model family (Alibaba's Qwen) than the one that writes the resumes (OpenAI's gpt-oss), so it isn't
+# grading its own style. Free on Groq with its own rate limits. Override with EVAL_JUDGE_MODEL if Groq retires it
+# (list current models with: python -c "from groq import Groq; print([m.id for m in Groq().models.list().data])").
+JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "qwen/qwen3.8-27b")
 
 RUBRIC = {
     "truthfulness": "Every claim is supported by the original resume. 5 = nothing invented; 1 = invented "
@@ -45,7 +46,7 @@ def judge_resume(original: str, job_description: str | None, tailored: str) -> d
     {{"scores": {{{", ".join(f'"{name}": 0' for name in RUBRIC)}}}, "unsupported_claims": [], "notes": "one sentence"}}
     """
     for _ in range(2):
-        parsed = main.parse_json_object(main.call_llm(prompt, temperature=0, model=JUDGE_MODEL))
+        parsed = main.parse_json_object(main.call_llm(prompt, temperature=0, model=JUDGE_MODEL, max_tokens=800))
         raw = parsed.get("scores") if isinstance(parsed.get("scores"), dict) else {}
         scores = {}
         for name in RUBRIC:

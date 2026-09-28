@@ -141,3 +141,30 @@ def test_cli_requires_api_key(monkeypatch, capsys):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     assert main_cli(["run"]) == 2
     assert "GROQ_API_KEY" in capsys.readouterr().out
+
+
+def test_frozen_requirements_round_trip(pipeline, tmp_path):
+    cases = [{"id": "fake", "request": dict(REQUEST), "expect": {}}]
+    path = tmp_path / "requirements.json"
+    assert runner.load_frozen_requirements(cases, path=path) == ["fake"]      # nothing frozen yet
+    main.extract_job_requirements(REQUEST["job_description"])                  # the run extracts...
+    runner.save_frozen_requirements(cases, path=path)                          # ...and freezes
+    main._JOB_REQUIREMENTS_CACHE.clear()
+    assert runner.load_frozen_requirements(cases, path=path) == []            # now seeded from the file
+    assert main._JOB_REQUIREMENTS_CACHE[main.job_cache_key(REQUEST["job_description"])]
+    assert runner.load_frozen_requirements(cases, refresh=True, path=path) == ["fake"]
+
+
+def test_per_minute_rate_limit_waits_and_retries(pipeline, monkeypatch):
+    monkeypatch.setattr(runner, "RATE_LIMIT_WAIT_SECONDS", 0)
+    attempts = []
+
+    def flaky_judge(*args):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise main.LLMBusyError("per-minute limit")
+        return fake_judge(*args)
+
+    result = runner.run_case({"id": "x", "request": dict(REQUEST), "expect": {}}, "v1",
+                             judge=flaky_judge, progress=lambda m: None)
+    assert len(attempts) == 3 and result["judge"]["overall"] == 4.0

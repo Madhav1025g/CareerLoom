@@ -2,13 +2,20 @@ TARGET JOB DESCRIPTION (tailor the resume to THIS role):
 $job_description
 
 Job keywords the original resume ALREADY contains — every one MUST appear, spelled exactly like this: $keep
-Job keywords the original resume is missing: $gaps
+Job keywords NOT found in the original resume: $gaps
+(Do NOT add these unless the source resume clearly shows that experience under other wording.)
 
 Tailoring rules:
-- Open the PROFESSIONAL SUMMARY with the target role's title and the candidate's strengths most relevant to it.
+- Open the PROFESSIONAL SUMMARY by positioning the candidate for the target role using their REAL current title
+  and the strengths most relevant to the job (e.g. "Java backend engineer seeking a Staff Software Engineer
+  role"). Never present the target job's title or seniority as the candidate's own,
+  and never state a number of years of experience that the source resume does not state or support.
 - Mirror the job description's exact terminology wherever the candidate's real experience matches
   (e.g. if the job says "CI/CD" and the resume says "automated deployments", write "CI/CD (automated deployments)").
 - Within each job, put the most job-relevant bullets first. Order skill categories by relevance to the job.
 - For each missing keyword: include it ONLY if the source resume shows the candidate genuinely has
   that experience, possibly under different wording. NEVER add a skill, tool, certification, employer, title,
   or metric that the source resume does not support. Honesty matters more than the score.
+- Never copy a requirement from the job description into the resume (e.g. "mentoring engineers",
+  "designing high-availability systems") unless the source resume describes that work. A gap is better than a
+  claim the candidate can't back up in an interview.

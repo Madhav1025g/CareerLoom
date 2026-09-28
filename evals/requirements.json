@@ -1,0 +1,456 @@
+{
+  "fake": [
+    {
+      "id": "r1",
+      "text": "3+ years of backend experience",
+      "category": "experience_years",
+      "importance": "required",
+      "keywords": [],
+      "min_years": 3.0,
+      "max_years": null
+    },
+    {
+      "id": "r2",
+      "text": "Python",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Python"
+      ]
+    },
+    {
+      "id": "r3",
+      "text": "FastAPI web services",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "FastAPI",
+        "Python"
+      ]
+    },
+    {
+      "id": "r4",
+      "text": "AWS cloud experience",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "AWS"
+      ]
+    },
+    {
+      "id": "r5",
+      "text": "Containers with Docker",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Docker"
+      ]
+    },
+    {
+      "id": "r6",
+      "text": "Kubernetes",
+      "category": "skill",
+      "importance": "preferred",
+      "keywords": [
+        "Kubernetes"
+      ]
+    },
+    {
+      "id": "r7",
+      "text": "Strong backend fundamentals",
+      "category": "knowledge",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r8",
+      "text": "Collaborative team player",
+      "category": "soft_skill",
+      "importance": "required",
+      "keywords": []
+    }
+  ],
+  "strong_backend": [
+    {
+      "id": "r1",
+      "text": "2-10 years of industry software experience",
+      "category": "experience_years",
+      "importance": "required",
+      "keywords": [],
+      "min_years": 2.0,
+      "max_years": 10.0
+    },
+    {
+      "id": "r2",
+      "text": "Strong backend engineering fundamentals",
+      "category": "knowledge",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r3",
+      "text": "Experience building distributed systems",
+      "category": "knowledge",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r4",
+      "text": "Proficiency in Python or Go",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Python",
+        "Go"
+      ]
+    },
+    {
+      "id": "r5",
+      "text": "Experience running services on AWS",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "AWS"
+      ]
+    },
+    {
+      "id": "r6",
+      "text": "Design event-driven architectures",
+      "category": "knowledge",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r7",
+      "text": "Kafka experience",
+      "category": "skill",
+      "importance": "preferred",
+      "keywords": [
+        "Kafka"
+      ]
+    },
+    {
+      "id": "r8",
+      "text": "Bachelor's degree in Computer Science or related field",
+      "category": "education",
+      "importance": "required",
+      "keywords": [
+        "Computer Science"
+      ]
+    }
+  ],
+  "years_short": [
+    {
+      "id": "r1",
+      "text": "6+ years of professional software engineering experience",
+      "category": "experience_years",
+      "importance": "required",
+      "keywords": [],
+      "min_years": 6.0,
+      "max_years": null
+    },
+    {
+      "id": "r2",
+      "text": "Deep expertise in Java",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Java"
+      ]
+    },
+    {
+      "id": "r3",
+      "text": "Deep expertise in Spring Boot",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Spring Boot"
+      ]
+    },
+    {
+      "id": "r4",
+      "text": "Experience leading technical projects across teams",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "leading technical projects"
+      ]
+    },
+    {
+      "id": "r5",
+      "text": "Experience designing high-availability systems",
+      "category": "knowledge",
+      "importance": "required",
+      "keywords": [
+        "high-availability"
+      ]
+    },
+    {
+      "id": "r6",
+      "text": "Experience mentoring engineers",
+      "category": "soft_skill",
+      "importance": "preferred",
+      "keywords": []
+    }
+  ],
+  "overqualified": [
+    {
+      "id": "r1",
+      "text": "1-3 years of overall professional experience",
+      "category": "experience_years",
+      "importance": "required",
+      "keywords": [],
+      "min_years": 1.0,
+      "max_years": 3.0
+    },
+    {
+      "id": "r2",
+      "text": "1-3 years of experience with JavaScript",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "JavaScript"
+      ]
+    },
+    {
+      "id": "r3",
+      "text": "1-3 years of experience with React",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "React"
+      ]
+    },
+    {
+      "id": "r4",
+      "text": "1-3 years of experience with CSS",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "CSS"
+      ]
+    },
+    {
+      "id": "r5",
+      "text": "Experience building UI components",
+      "category": "knowledge",
+      "importance": "required",
+      "keywords": [
+        "UI components"
+      ]
+    },
+    {
+      "id": "r6",
+      "text": "Ability to work under guidance of senior engineers",
+      "category": "soft_skill",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r7",
+      "text": "Familiarity with modern frontend tooling (e.g., Webpack, Babel)",
+      "category": "skill",
+      "importance": "preferred",
+      "keywords": [
+        "Webpack",
+        "Babel"
+      ]
+    },
+    {
+      "id": "r8",
+      "text": "Basic understanding of responsive design principles",
+      "category": "knowledge",
+      "importance": "preferred",
+      "keywords": [
+        "responsive design"
+      ]
+    }
+  ],
+  "career_changer": [
+    {
+      "id": "r1",
+      "text": "Data Analyst",
+      "category": "title",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r2",
+      "text": "SQL",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "SQL"
+      ]
+    },
+    {
+      "id": "r3",
+      "text": "Tableau",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Tableau"
+      ]
+    },
+    {
+      "id": "r4",
+      "text": "Python",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Python"
+      ]
+    },
+    {
+      "id": "r5",
+      "text": "Strong statistics knowledge",
+      "category": "knowledge",
+      "importance": "required",
+      "keywords": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "r6",
+      "text": "Excellent communication with non-technical audiences",
+      "category": "soft_skill",
+      "importance": "required",
+      "keywords": []
+    }
+  ],
+  "missing_skills": [
+    {
+      "id": "r1",
+      "text": "4+ years of overall professional experience",
+      "category": "experience_years",
+      "importance": "required",
+      "keywords": [],
+      "min_years": 4.0,
+      "max_years": null
+    },
+    {
+      "id": "r2",
+      "text": "Proficiency in React",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "React"
+      ]
+    },
+    {
+      "id": "r3",
+      "text": "Proficiency in TypeScript",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "TypeScript"
+      ]
+    },
+    {
+      "id": "r4",
+      "text": "Experience deploying services on Kubernetes",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Kubernetes"
+      ]
+    },
+    {
+      "id": "r5",
+      "text": "Experience managing infrastructure as code with Terraform",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Terraform"
+      ]
+    },
+    {
+      "id": "r6",
+      "text": "Ability to own features end to end from UI to deployment",
+      "category": "soft_skill",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r7",
+      "text": "Full-Stack Platform Engineer role",
+      "category": "title",
+      "importance": "required",
+      "keywords": [
+        "Full-Stack Platform Engineer"
+      ]
+    }
+  ],
+  "messy_pdf_text": [
+    {
+      "id": "r1",
+      "text": "Data Engineer",
+      "category": "title",
+      "importance": "required",
+      "keywords": []
+    },
+    {
+      "id": "r2",
+      "text": "3+ years of overall professional experience",
+      "category": "experience_years",
+      "importance": "required",
+      "keywords": [],
+      "min_years": 3.0,
+      "max_years": null
+    },
+    {
+      "id": "r3",
+      "text": "Experience building batch pipelines",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "batch pipelines"
+      ]
+    },
+    {
+      "id": "r4",
+      "text": "Experience with Spark",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Spark"
+      ]
+    },
+    {
+      "id": "r5",
+      "text": "Experience with Airflow",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Airflow"
+      ]
+    },
+    {
+      "id": "r6",
+      "text": "Strong SQL skills",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "SQL"
+      ]
+    },
+    {
+      "id": "r7",
+      "text": "Python programming skills",
+      "category": "skill",
+      "importance": "required",
+      "keywords": [
+        "Python"
+      ]
+    },
+    {
+      "id": "r8",
+      "text": "Snowflake experience",
+      "category": "skill",
+      "importance": "preferred",
+      "keywords": [
+        "Snowflake"
+      ]
+    }
+  ]
+}

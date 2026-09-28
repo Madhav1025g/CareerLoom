@@ -175,7 +175,7 @@ def _rate_limit_info(exc):
 GROQ_MODEL = "openai/gpt-oss-20b"
 
 
-def call_llm(prompt, temperature=0.4, model=None):
+def call_llm(prompt, temperature=0.4, model=None, max_tokens=4096):
     rate_limit = None  # (daily,) when the last provider failure was a rate limit
     # Groq path (free) — used when LLM_PROVIDER=groq and a key is configured
     if LLM_PROVIDER == "groq" and groq_client is not None:
@@ -183,12 +183,18 @@ def call_llm(prompt, temperature=0.4, model=None):
             # gpt-oss is a reasoning model: hidden reasoning tokens count against max_tokens. Low effort
             # leaves room for the actual resume; max_tokens stays small enough for Groq's free-tier TPM limit.
             model = model or GROQ_MODEL
-            # reasoning_effort only exists for reasoning models (gpt-oss); other models reject it.
-            reasoning = {"reasoning_effort": "low"} if model.startswith("openai/gpt-oss") else {}
+            # Reasoning controls differ by model family: gpt-oss takes an effort level; Qwen can "think" out loud,
+            # so keep its reasoning out of the answer. Other models reject both parameters.
+            if model.startswith("openai/gpt-oss"):
+                reasoning = {"reasoning_effort": "low"}
+            elif model.startswith("qwen/"):
+                reasoning = {"reasoning_effort": "none"}  # answer directly: fewer tokens, steadier output
+            else:
+                reasoning = {}
             response = groq_client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
+                max_tokens=max_tokens,  # counts toward Groq's tokens-per-minute limit, so small answers ask for less
                 temperature=temperature,
                 **reasoning,
             )
@@ -564,12 +570,16 @@ def _normalize_requirements(raw_items) -> list[dict]:
     return requirements[:20]
 
 
+def job_cache_key(job_description: str) -> str:
+    return hashlib.sha256((job_description or "").strip().encode()).hexdigest()
+
+
 def extract_job_requirements(job_description: str | None) -> list[dict]:
     """Break a job description into requirements (once per job: temperature 0, one retry, cached)."""
     job_description = (job_description or "").strip()
     if not job_description:
         return []
-    cache_key = hashlib.sha256(job_description.encode()).hexdigest()
+    cache_key = job_cache_key(job_description)
     if cache_key in _JOB_REQUIREMENTS_CACHE:
         return [dict(r) for r in _JOB_REQUIREMENTS_CACHE[cache_key]]
 
@@ -730,11 +740,14 @@ def evidence_in_resume(evidence: str, resume_text: str) -> bool:
     return False
 
 
-def requirement_cache_key(resume_text: str, requirements: list[dict]) -> str:
-    return hashlib.sha256(((resume_text or "") + json.dumps(requirements, sort_keys=True)).encode()).hexdigest()
+def requirement_cache_key(resume_text: str, requirements: list[dict], years_from: str | None = None,
+                          capped: bool = False) -> str:
+    raw = (resume_text or "") + json.dumps(requirements, sort_keys=True) + "\x00" + (years_from or "") + str(capped)
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def evaluate_requirements(resume_text: str, requirements: list[dict], cache: dict | None = None) -> dict:
+def evaluate_requirements(resume_text: str, requirements: list[dict], cache: dict | None = None,
+                          years_from: str | None = None, original_eval: dict | None = None) -> dict:
     """
     Score a resume against the job's requirements like a recruiter's scorecard. Years are checked in code; the
     rest are judged by the AI (temperature 0), which must quote the resume line that proves each match — quotes
@@ -743,11 +756,13 @@ def evaluate_requirements(resume_text: str, requirements: list[dict], cache: dic
     """
     if not requirements:
         return {"score": None, "items": [], "years": None, "years_source": None}
-    cache_key = requirement_cache_key(resume_text, requirements)
+    cache_key = requirement_cache_key(resume_text, requirements, years_from, capped=original_eval is not None)
     if cache is not None and cache_key in cache:
         return cache[cache_key]
 
-    years, years_source = resume_years(resume_text)
+    # years_from: take experience from the ORIGINAL resume when judging an AI-tailored version, so a claim the
+    # AI added (e.g. "6+ years") can never earn credit the candidate doesn't have.
+    years, years_source = resume_years(years_from if years_from is not None else resume_text)
     to_judge = [r for r in requirements if r["category"] != "experience_years"]
     judged = {}
     if to_judge:
@@ -778,6 +793,9 @@ def evaluate_requirements(resume_text: str, requirements: list[dict], cache: dic
         items = parse_json_object(call_llm(prompt, temperature=0)).get("results")
         judged = {str(i.get("id")): i for i in items if isinstance(i, dict)} if isinstance(items, list) else {}
 
+    # original_eval: when judging an AI-tailored resume, a requirement the ORIGINAL resume had no evidence for
+    # can't be earned — rewording can make evidence clearer (partial -> met), but can't create it.
+    original_status = {i["id"]: i["status"] for i in (original_eval or {}).get("items", [])}
     evaluated = []
     for requirement in requirements:
         if requirement["category"] == "experience_years":
@@ -791,6 +809,9 @@ def evaluate_requirements(resume_text: str, requirements: list[dict], cache: dic
                 status = "partial" if status == "met" else "not_met"
                 reason = (reason + " " if reason else "") + "(We couldn't find the quoted evidence in your resume.)"
                 evidence = ""
+            if original_status.get(requirement["id"]) == "not_met" and status != "not_met":
+                status, evidence = "not_met", ""
+                reason = "Your original resume shows no evidence of this, so the tailored version can't claim it."
             verdict = {"status": status, "credit": STATUS_CREDIT[status], "evidence": evidence, "reason": reason}
         weight = SOFT_SKILL_WEIGHT if requirement["category"] == "soft_skill" else IMPORTANCE_WEIGHT[requirement["importance"]]
         evaluated.append({**requirement, **verdict, "weight": weight})
@@ -980,6 +1001,70 @@ def human_optimizer_agent(user_request, resume_text, keep_keywords=None, prompt_
     log_event("Human optimization completed")
 
     return output
+
+#----------------------
+# GUARDRAIL: UNSUPPORTED CLAIMS (found by the eval harness — prompts alone don't stop every invented skill)
+#----------------------
+
+def unsupported_terms(original_text: str, tailored_text: str, requirements: list[dict], original_eval: dict) -> list[str]:
+    """
+    Job keywords the tailored resume mentions that the original never did, for requirements the original showed no
+    evidence of at all (e.g. "Tableau" for a candidate who never used it). Rewording that surfaces real experience
+    (Lambda -> "serverless") isn't flagged, because the original had partial evidence for those requirements.
+    """
+    no_evidence = {i["id"] for i in (original_eval or {}).get("items", []) if i["status"] == "not_met"}
+    terms = []
+    for requirement in requirements:
+        if requirement["id"] not in no_evidence:
+            continue
+        for keyword in requirement.get("keywords", []):
+            if (contains_term(tailored_text, keyword) and not contains_term(original_text, keyword)
+                    and keyword not in terms):
+                terms.append(keyword)
+    return terms
+
+
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def invented_numbers(original_text: str, tailored_text: str, allowed=()) -> list[str]:
+    """
+    Numbers in the tailored resume that the original never contained (e.g. an invented "25%"). Compared as bare
+    digits, so "1M+" vs "1 million" isn't flagged. `allowed` covers figures the user supplied elsewhere; a years
+    total derived from the job dates is always allowed.
+    """
+    def numbers(text):
+        return {n.replace(",", "") for n in _NUMBER_RE.findall(text or "")}
+    years, _ = resume_years(original_text)
+    derived = {str(int(years)), str(round(years))} if years else set()
+    extra = numbers(tailored_text) - numbers(original_text) - derived - {str(a) for a in allowed}
+    return sorted(extra, key=lambda n: (len(n), n))
+
+
+def remove_unsupported_claims(resume_text: str, terms: list[str], numbers: list[str] | None = None) -> str:
+    """Ask the LLM to strip specific unsupported claims while leaving everything else untouched."""
+    problems = []
+    if terms:
+        problems.append(f"- Experience with: {', '.join(terms)}. Remove every mention of these terms and any "
+                        "sentence fragment claiming experience with them (summary, bullets, and skills lists).")
+    if numbers:
+        problems.append(f"- These figures, which appear nowhere in the original: {', '.join(numbers)}. Remove each "
+                        "figure together with the claim it supports (e.g. drop \"improving throughput by 25%\" "
+                        "entirely, keeping the rest of the bullet).")
+    prompt = f"""
+    The resume below contains claims the candidate's original resume does NOT support, so they must be removed:
+    {chr(10).join(problems)}
+
+    Change NOTHING else: keep every other word, line, job, date, number, and heading exactly as it is. If a
+    removal leaves an empty skills line, delete that line.
+
+    Return only the corrected resume as plain text.
+
+    Resume:
+    {resume_text}
+    """
+    return call_llm(prompt, temperature=0)
+
 
 #----------------------
 # REVIEWER AGENT (reviews the FINAL resume, returns structured suggestions)
@@ -1304,13 +1389,44 @@ def orchestrator(user_request, request_id, progress_callback=None, prompt_versio
         else:
             completeness_output, after = polished_completeness, polished_scores
         final_resume_text = human_optimizer_output["human_friendly_resume"]
+
+        # Guardrail: strip skills the tailored resume claims but the original never showed (one extra call, only
+        # when needed), then verify. Anything that can't be removed cleanly is reported to the user.
+        original_eval = requirements_before_future.result()
+        flagged = unsupported_terms(resume_text or "", final_resume_text, requirements, original_eval)
+        form_numbers = [user_request.get("experience_years")]
+        new_numbers = invented_numbers(resume_text or "", final_resume_text, form_numbers)
+        claims_guard = {"removed": [], "removed_numbers": [], "unresolved": []}
+        if flagged or new_numbers:
+            notify("Removing claims your resume doesn't support...")
+            repaired = remove_unsupported_claims(final_resume_text, flagged, new_numbers)
+            repaired_completeness = check_completeness(resume_text, repaired)
+            remaining_numbers = set(invented_numbers(resume_text or "", repaired, form_numbers))
+            still_there = ([t for t in flagged if contains_term(repaired, t)]
+                           + [n for n in new_numbers if n in remaining_numbers])
+            if (is_usable_resume(repaired, resume_text)
+                    and repaired_completeness["completeness_pct"] >= completeness_output["completeness_pct"]):
+                final_resume_text = repaired
+                human_optimizer_output = {**human_optimizer_output, "human_friendly_resume": repaired}
+                completeness_output = repaired_completeness
+                after = ats_breakdown(repaired, job_description, user_request["skills"], job_keywords)
+                claims_guard = {"removed": [t for t in flagged if t not in still_there],
+                                "removed_numbers": [n for n in new_numbers if n not in still_there],
+                                "unresolved": still_there}
+            else:
+                claims_guard = {"removed": [], "removed_numbers": [], "unresolved": flagged + new_numbers}
+            log_event(f"{request_id}: claims guard removed {len(claims_guard['removed'])} skills and "
+                      f"{len(claims_guard['removed_numbers'])} figures, "
+                      f"unresolved {len(claims_guard['unresolved'])}")
+
         if completeness_output["possibly_missing"]:
             log_event(f"{request_id}: WARNING — {len(completeness_output['possibly_missing'])} entries possibly dropped")
 
         notify("Reviewing and building your recruiter snapshot...")
         reviewer_future = pool.submit(reviewer_agent, final_resume_text) if extras else None
         snapshot_future = pool.submit(recruiter_snapshot_agent, user_request, final_resume_text) if extras else None
-        requirements_after_future = pool.submit(evaluate_requirements, final_resume_text, requirements, eval_cache)
+        requirements_after_future = pool.submit(evaluate_requirements, final_resume_text, requirements, eval_cache,
+                                                resume_text or "", original_eval)
 
         ats_output["before"] = {k: ats_output[k] for k in ("ats_score", "keyword_score", "semantic_score")}
         ats_output["after"] = {"ats_score": after["overall"], "keyword_score": after["keyword"], "semantic_score": after["semantic"]}
@@ -1346,6 +1462,7 @@ def orchestrator(user_request, request_id, progress_callback=None, prompt_versio
             "requirement_match": requirement_match,
             "cover_letter": cover_letter_output,
             "completeness_check": completeness_output,
+            "claims_guard": claims_guard,
         },
     }
 

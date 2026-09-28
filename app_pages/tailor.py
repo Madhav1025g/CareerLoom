@@ -239,7 +239,10 @@ if generate_clicked:
             if match.get("requirements"):
                 cache = st.session_state.setdefault("req_eval_cache", {})
                 cache[requirement_cache_key(resume_text, match["requirements"])] = match["before"]
-                cache[requirement_cache_key(st.session_state.docs["resume"], match["requirements"])] = match["after"]
+                # The generated "after" check is capped by the original (see evaluate_requirements); store it under
+                # the uncapped key the page looks up, so user re-checks after edits are judged on their own.
+                cache[requirement_cache_key(st.session_state.docs["resume"], match["requirements"],
+                                            resume_text)] = match["after"]
             st.session_state.letter_tone = "Formal"
             st.session_state.pop("interview_prep", None)
 
@@ -459,7 +462,10 @@ if "last_result" in st.session_state and "docs" in st.session_state:
     requirements = req_data.get("requirements", [])
     req_before = req_data.get("before") or {}
     req_cache = st.session_state.setdefault("req_eval_cache", {})
-    req_current = req_cache.get(requirement_cache_key(st.session_state.docs["resume"], requirements)) if requirements else None
+    # Years of experience always come from the resume the user supplied, never from AI-written text.
+    years_source_text = request.get("resume_text") or ""
+    req_current = (req_cache.get(requirement_cache_key(st.session_state.docs["resume"], requirements, years_source_text))
+                   if requirements else None)
     req_stale = bool(requirements) and req_current is None
     req_after = req_current or req_data.get("after") or {}
     before = {**before, "requirement_score": req_before.get("score")}
@@ -518,6 +524,16 @@ if "last_result" in st.session_state and "docs" in st.session_state:
     )
 
     with tab_resume:
+        guard = workflow.get("claims_guard") or {}
+        if guard.get("removed"):
+            st.info("We removed claims about " + ", ".join(guard["removed"]) + " that your original resume didn't "
+                    "support. If you genuinely have that experience, add it with Edit or \"I have this\" in Job match.")
+        if guard.get("removed_numbers"):
+            st.info("We removed figures (" + ", ".join(guard["removed_numbers"]) + ") the AI added that aren't in "
+                    "your original resume. Only include numbers you can back up in an interview.")
+        if guard.get("unresolved"):
+            st.warning("This version still mentions " + ", ".join(guard["unresolved"]) + ", which your original "
+                       "resume doesn't show. Remove it with Edit unless it's genuinely true.")
         if completeness.get("possibly_missing"):
             st.warning(
                 f"Content check: {completeness['completeness_pct']}% of the entries we detected in your original "
@@ -603,7 +619,7 @@ if "last_result" in st.session_state and "docs" in st.session_state:
                 note_col.info("You've edited your resume since the requirements were last checked.")
                 if button_col.button("Re-check requirements", type="primary", width="stretch"):
                     if run_on_demand("Re-checking each requirement...", evaluate_requirements,
-                                     st.session_state.docs["resume"], requirements, req_cache):
+                                     st.session_state.docs["resume"], requirements, req_cache, years_source_text):
                         st.rerun()
             items = req_after.get("items", [])
             met = sum(i["status"] == "met" for i in items)

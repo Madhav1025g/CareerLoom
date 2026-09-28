@@ -1,3 +1,4 @@
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -505,3 +506,83 @@ def test_orchestrator_reports_requirement_match_before_and_after(pipeline):
 def test_no_job_description_means_no_requirement_score(pipeline):
     wf = pipeline.orchestrator({**REQUEST, "job_description": None}, "req-nojd")["workflow"]
     assert wf["requirement_match"]["before"]["score"] is None
+
+
+def test_tailored_resume_cannot_claim_extra_years(pipeline):
+    # Regression (found by the eval harness): the AI wrote "over 6 years" for a ~2-year candidate and the
+    # requirement score believed it. Years must come from the original resume.
+    reqs = [{"id": "r1", "text": "6+ years", "category": "experience_years", "importance": "required",
+             "min_years": 6, "max_years": None, "keywords": []}]
+    original = "Engineer | Cedar | Jun 2022 - Aug 2024\n- Built services"
+    tailored = "Engineer with over 6 years of professional experience\n" + original
+    assert main.evaluate_requirements(tailored, reqs)["items"][0]["status"] == "met"          # naive: fooled
+    assert main.evaluate_requirements(tailored, reqs, years_from=original)["items"][0]["status"] == "partial"
+
+
+def test_prompts_forbid_claiming_the_target_title():
+    for version in ("v1", "v2"):
+        text = main.render_prompt("tailoring", version, job_description="JD", keep="", gaps="")
+        assert "Never present the target job's title or seniority as the candidate's own" in text
+
+
+def test_tailored_resume_cannot_earn_requirements_the_original_lacks(pipeline, monkeypatch):
+    reqs = main.extract_job_requirements(REQUEST["job_description"])
+    original = main.evaluate_requirements(SOURCE_RESUME, reqs)
+    assert next(i for i in original["items"] if i["text"] == "Kubernetes")["status"] == "not_met"
+
+    # The judge is fooled by a fabricated Kubernetes claim in the tailored text...
+    fooled = json.loads(fake_llm('"results": ['))
+    for item in fooled["results"]:
+        if item["id"] == "r6":
+            item.update(status="met", evidence="Deployed microservices on AWS Lambda and ECS")
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: json.dumps(fooled) if '"results": [' in p else fake_llm(p))
+
+    # ...but a requirement with no evidence in the ORIGINAL resume can't be earned by the tailored version.
+    after = main.evaluate_requirements(TAILORED_RESUME, reqs, years_from=SOURCE_RESUME, original_eval=original)
+    kube = next(i for i in after["items"] if i["text"] == "Kubernetes")
+    assert kube["status"] == "not_met" and "no evidence" in kube["reason"]
+
+
+# ---------------------------------------------------------------- unsupported-claims guard
+
+KUBE_RESUME = TAILORED_RESUME.replace("Cloud & DevOps: AWS, Docker, GitHub Actions",
+                                      "Cloud & DevOps: AWS, Docker, Kubernetes, GitHub Actions")
+
+
+def test_unsupported_terms_only_flags_requirements_without_original_evidence(pipeline):
+    reqs = main.extract_job_requirements(REQUEST["job_description"])
+    original_eval = main.evaluate_requirements(SOURCE_RESUME, reqs)
+    assert main.unsupported_terms(SOURCE_RESUME, KUBE_RESUME, reqs, original_eval) == ["Kubernetes"]
+    assert main.unsupported_terms(SOURCE_RESUME, TAILORED_RESUME, reqs, original_eval) == []
+
+
+def test_orchestrator_removes_invented_skill(pipeline, monkeypatch):
+    def llm(prompt, **kwargs):
+        if "Generate a professional ATS-friendly resume" in prompt or "Human sounding" in prompt:
+            return KUBE_RESUME          # the writer invents Kubernetes
+        return fake_llm(prompt)         # the removal call returns the clean resume
+
+    monkeypatch.setattr(main, "call_llm", llm)
+    wf = pipeline.orchestrator(dict(REQUEST), "req-guard")["workflow"]
+    assert wf["claims_guard"] == {"removed": ["Kubernetes"], "removed_numbers": [], "unresolved": []}
+    assert "Kubernetes" not in wf["human_optimizer"]["human_friendly_resume"]
+
+
+def test_orchestrator_reports_claims_it_could_not_remove(pipeline, monkeypatch):
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: KUBE_RESUME if (
+        "Generate a professional" in p or "Human sounding" in p or "must be removed" in p) else fake_llm(p))
+    wf = pipeline.orchestrator(dict(REQUEST), "req-guard2")["workflow"]
+    assert wf["claims_guard"]["unresolved"] == ["Kubernetes"]
+
+
+def test_invented_numbers_detected_and_removed(pipeline, monkeypatch):
+    boosted = TAILORED_RESUME.replace("- Developed internal dashboards in React",
+                                      "- Developed internal dashboards in React, improving throughput by 25%")
+    assert main.invented_numbers(SOURCE_RESUME, boosted) == ["25"]
+    assert main.invented_numbers(SOURCE_RESUME, boosted, allowed=[25]) == []
+
+    monkeypatch.setattr(main, "call_llm", lambda p, **k: boosted if (
+        "Generate a professional" in p or "Human sounding" in p) else fake_llm(p))
+    wf = pipeline.orchestrator(dict(REQUEST), "req-numbers")["workflow"]
+    assert wf["claims_guard"]["removed_numbers"] == ["25"]
+    assert "25%" not in wf["human_optimizer"]["human_friendly_resume"]

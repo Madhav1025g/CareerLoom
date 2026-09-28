@@ -1,17 +1,6 @@
 """Structural checks: things that must hold for every tailored resume, whatever the exact wording."""
-import re
-
 import main
 from document_builder import parse_resume
-
-# Digits, optionally with separators ("1,200", "2.5"). Compared as bare digit strings so "1M+" vs "1 million"
-# or "5 years" vs "5+ years" don't count as new numbers, while an invented "40%" does.
-_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
-
-
-def _numbers(text: str) -> set[str]:
-    return {n.replace(",", "") for n in _NUMBER_RE.findall(text or "")}
-
 
 def check(name: str, passed: bool, detail: str = "", hard: bool = True) -> dict:
     return {"name": name, "passed": bool(passed), "detail": detail, "hard": hard}
@@ -50,7 +39,7 @@ def run_checks(case: dict, result: dict) -> list[dict]:
     checks.append(check("resume_format", format_ok,
                         f"{headings} section headings; {len(markdown)} Markdown lines" if not format_ok else ""))
 
-    invented = sorted(_numbers(final) - _numbers(original), key=lambda n: (len(n), n))
+    invented = main.invented_numbers(original, final, [request.get("experience_years", "")])
     checks.append(check("no_invented_numbers", not invented, f"New numbers: {', '.join(invented)}" if invented else ""))
 
     lost = workflow["ats_optimization"].get("lost_keywords", [])

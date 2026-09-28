@@ -63,6 +63,8 @@ def main_cli(argv=None) -> int:
         p.add_argument("--prompts", default=main.PROMPT_VERSION, help="prompt version folder (default: live version)")
         p.add_argument("--cases", help="comma-separated case ids (default: all)")
     sub.choices["run"].add_argument("--save-baseline", action="store_true", help="store the result as the baseline")
+    sub.choices["run"].add_argument("--refresh-requirements", action="store_true",
+                                    help="re-extract each case's job requirements instead of using the frozen lists")
     sub.choices["gate"].add_argument("--baseline", default=str(runner.BASELINE_PATH))
     compare = sub.add_parser("compare")
     compare.add_argument("--baseline", required=True, help="baseline prompt version, e.g. v1")
@@ -90,7 +92,8 @@ def main_cli(argv=None) -> int:
                 print(f"  - {problem}")
             return 0
 
-        report = runner.run_suite(args.prompts, case_ids)
+        report = runner.run_suite(args.prompts, case_ids,
+                                  refresh_requirements=getattr(args, "refresh_requirements", False))
         runner.save(report, RESULTS_DIR / f"{args.prompts}.json")
         print_report(report)
 
