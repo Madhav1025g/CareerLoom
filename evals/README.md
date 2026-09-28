@@ -9,9 +9,16 @@ graded two ways:
 | Grader | What it checks | Gate rule |
 |---|---|---|
 | **Structural checks** (`checks.py`) | usable output · every job kept · resume format · no invented numbers · job keywords kept · valid requirement scores · case expectations (years verdict, specific requirements, skills that must not be invented) | Any hard check failing fails the gate |
-| **LLM judge** (`judge.py`) | 1–5 rubric: truthfulness, job relevance, completeness, readability, ATS format, scored by a different model family (`qwen/qwen3.8-27b` on Groq, override with `EVAL_JUDGE_MODEL`) | Fails if the mean drops > 0.3 below the baseline (truthfulness has its own 0.3 bar) |
+| **LLM judge** (`judge.py`) | 1–5 rubric: truthfulness, job relevance, completeness, readability, ATS format, scored by a different model family (`qwen/qwen3.8-27b` on Groq, override with `EVAL_JUDGE_MODEL`) | Fails if the mean drops > 0.5 below the baseline (truthfulness: > 0.75) |
 
-Mean requirement match and ATS match after tailoring must also stay within 5 points of the baseline.
+Mean requirement match must stay within 8 points of the baseline, and mean ATS match within 5.
+
+## Noise and repeats
+
+LLM output varies from run to run, so the same prompts don't score identically twice. Measured on this golden
+set, one sample per case moved the judge's truthfulness mean by up to 0.8. So every case runs **twice** by
+default (`--repeats`), the baseline is built from 12 samples, and the gate margins above are set from that
+measured noise. Deterministic hard checks, not the judge margins, are what catch fabrication.
 
 ## Commands
 
@@ -29,7 +36,8 @@ Exit codes: `0` pass · `1` quality dropped · `2` could not run (missing key, r
 ## Setup
 
 Needs `GROQ_API_KEY` in the project's `.env` file locally, and as a GitHub Actions repository secret for CI.
-A full run makes about 30 API calls (plus one judge call per case), so the CI gate only runs when `main.py`,
+A full run (6 cases × 2 samples) makes about 60 API calls and takes 15–25 minutes, pausing whenever
+Groq's free per-minute limit is reached, so the CI gate only runs when `main.py`,
 `prompts/`, or `evals/` change, or when started manually from the Actions tab.
 
 ## Frozen requirements

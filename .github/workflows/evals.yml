@@ -22,7 +22,7 @@ concurrency:
 jobs:
   evals:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,11 +45,19 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           LLM_PROVIDER: groq
         run: |
-          if [ -n "${{ inputs.cases }}" ]; then
-            python -m evals gate --cases "${{ inputs.cases }}"
-          else
-            python -m evals gate
-          fi
+          args=""
+          if [ -n "${{ inputs.cases }}" ]; then args="--cases ${{ inputs.cases }}"; fi
+          set +e
+          python -m evals gate $args 2>&1 | tee eval-output.txt
+          status=${PIPESTATUS[0]}
+          # Show the report on the run's summary page (readable without digging through logs).
+          {
+            echo "## Eval report"
+            echo '```'
+            grep -v " INFO " eval-output.txt | grep -v "^INFO" | tail -100
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
       - name: Upload eval report
         if: always()
         uses: actions/upload-artifact@v4

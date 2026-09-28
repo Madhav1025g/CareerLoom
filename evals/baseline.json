@@ -2,22 +2,22 @@
   "prompt_version": "v1",
   "model": "openai/gpt-oss-20b",
   "judge_model": "qwen/qwen3.8-27b",
-  "created_at": "2026-09-28T20:20:27+00:00",
+  "created_at": "2026-09-28T20:27:35+00:00",
   "summary": {
-    "cases": 6,
-    "hard_checks_passed": 49,
-    "hard_checks_total": 49,
-    "soft_checks_passed": 3,
-    "soft_checks_total": 3,
-    "judge_overall": 4.53,
-    "judge_truthfulness": 4.33,
-    "judge_job_relevance": 3.5,
-    "judge_completeness": 5.0,
-    "judge_readability": 4.83,
-    "judge_ats_format": 5.0,
+    "cases": 12,
+    "hard_checks_passed": 98,
+    "hard_checks_total": 98,
+    "soft_checks_passed": 6,
+    "soft_checks_total": 6,
+    "judge_overall": 4.37,
+    "judge_truthfulness": 3.92,
+    "judge_job_relevance": 3.33,
+    "judge_completeness": 4.92,
+    "judge_readability": 4.75,
+    "judge_ats_format": 4.92,
     "judge_unparsed": 0,
-    "requirement_before": 67.33,
-    "requirement_after": 67.33,
+    "requirement_before": 68.92,
+    "requirement_after": 69.67,
     "ats_before": 57.67,
     "ats_after": 60.0
   },
@@ -100,7 +100,8 @@
         "ats_after": 80
       },
       "used_draft": false,
-      "final_resume": "Priya Raman  \npriya.raman@example.com | Seattle, WA  \n\nPROFESSIONAL SUMMARY  \nSenior Backend Engineer with over seven years of experience delivering distributed services in Python and Go on AWS. Expert in designing event\u2011driven architectures with Kafka, reducing latency, and leading cross\u2011functional migrations.  \n\nEXPERIENCE  \n\nSenior Backend Engineer | Northwind Logistics | Seattle, WA | Mar 2021 \u2013 Aug 2025  \n- Designed an event\u2011driven order pipeline on Kafka that processes 40K events per second.  \n- Led the migration of 12 Python services to Go, cutting p99 latency by 45%.  \n- Owned AWS infrastructure (ECS, RDS, SQS) for a platform serving 3M users.  \n\nBackend Engineer | Brightline Health | Portland, OR | Jan 2018 \u2013 Feb 2021  \n- Built REST and gRPC APIs in Python for claims processing.  \n- Introduced PostgreSQL partitioning that reduced query times by 60%.  \n\nTECHNICAL SKILLS  \nLanguages: Python, Go, SQL  \nInfrastructure: AWS, Kafka, Docker, PostgreSQL  \n\nEDUCATION  \nB.S. Computer Engineering | Oregon State University | 2017"
+      "final_resume": "Priya Raman  \npriya.raman@example.com | Seattle, WA  \n\nPROFESSIONAL SUMMARY  \nSenior Backend Engineer with over seven years of experience delivering distributed services in Python and Go on AWS. Expert in designing event\u2011driven architectures with Kafka, reducing latency, and leading cross\u2011functional migrations.  \n\nEXPERIENCE  \n\nSenior Backend Engineer | Northwind Logistics | Seattle, WA | Mar 2021 \u2013 Aug 2025  \n- Designed an event\u2011driven order pipeline on Kafka that processes 40K events per second.  \n- Led the migration of 12 Python services to Go, cutting p99 latency by 45%.  \n- Owned AWS infrastructure (ECS, RDS, SQS) for a platform serving 3M users.  \n\nBackend Engineer | Brightline Health | Portland, OR | Jan 2018 \u2013 Feb 2021  \n- Built REST and gRPC APIs in Python for claims processing.  \n- Introduced PostgreSQL partitioning that reduced query times by 60%.  \n\nTECHNICAL SKILLS  \nLanguages: Python, Go, SQL  \nInfrastructure: AWS, Kafka, Docker, PostgreSQL  \n\nEDUCATION  \nB.S. Computer Engineering | Oregon State University | 2017",
+      "sample": 1
     },
     {
       "id": "years_short",
@@ -178,7 +179,8 @@
         "ats_after": 50
       },
       "used_draft": false,
-      "final_resume": "Alex Kim  \nalex.kim@example.com | Austin, TX  \n\nPROFESSIONAL SUMMARY  \nJava backend engineer with a strong focus on Spring Boot microservices, seeking a Staff Software Engineer role. Experienced in designing scalable payment systems, optimizing MySQL queries for finance teams, and elevating test coverage to ensure high-quality delivery in fast\u2011paced environments.  \n\nEXPERIENCE  \nSoftware Engineer | Cedar Payments | Austin, TX | Jun 2022 \u2013 Aug 2024  \n- Developed Spring Boot microservices for payment reconciliation, enhancing transaction accuracy and throughput.  \n- Authored complex MySQL reporting queries that became the primary data source for the finance team.  \n- Implemented comprehensive integration tests, increasing coverage from 55% to 80% and reducing regression risk.  \n\nTECHNICAL SKILLS  \nLanguages: Java, SQL  \nFrameworks: Spring Boot  \nDatabases: MySQL  \n\nEDUCATION  \nB.S. Computer Science | University of Texas at Austin | 2022"
+      "final_resume": "Alex Kim  \nalex.kim@example.com | Austin, TX  \n\nPROFESSIONAL SUMMARY  \nJava backend engineer with a strong focus on Spring Boot microservices, seeking a Staff Software Engineer role. Experienced in designing scalable payment systems, optimizing MySQL queries for finance teams, and elevating test coverage to ensure high-quality delivery in fast\u2011paced environments.  \n\nEXPERIENCE  \nSoftware Engineer | Cedar Payments | Austin, TX | Jun 2022 \u2013 Aug 2024  \n- Developed Spring Boot microservices for payment reconciliation, enhancing transaction accuracy and throughput.  \n- Authored complex MySQL reporting queries that became the primary data source for the finance team.  \n- Implemented comprehensive integration tests, increasing coverage from 55% to 80% and reducing regression risk.  \n\nTECHNICAL SKILLS  \nLanguages: Java, SQL  \nFrameworks: Spring Boot  \nDatabases: MySQL  \n\nEDUCATION  \nB.S. Computer Science | University of Texas at Austin | 2022",
+      "sample": 1
     },
     {
       "id": "overqualified",
@@ -246,7 +248,8 @@
         "ats_after": 57
       },
       "used_draft": false,
-      "final_resume": "Morgan Ellis  \nmorgan.ellis@example.com | Denver, CO  \n\nPROFESSIONAL SUMMARY  \nPrincipal Frontend Engineer with 15+ years of experience building web applications in JavaScript and React. Skilled in leading teams, establishing design systems, and delivering high\u2011quality UI components with strong CSS expertise. Seeking to apply proven knowledge of JavaScript, React, and CSS to a Junior Frontend Developer role, building UI components under senior guidance.\n\nEXPERIENCE  \nPrincipal Frontend Engineer | Summit Media | Denver, CO | 2016 - 2025  \n- Led a team of 8 engineers in rebuilding the publishing platform using React and TypeScript.  \n- Established the company design system adopted by 30 product teams, streamlining UI consistency across projects.\n\nSenior Web Developer | Blue River Agency | Boulder, CO | 2010 - 2016  \n- Built responsive marketing sites with JavaScript and CSS for 50+ clients, delivering engaging user experiences.\n\nTECHNICAL SKILLS  \nLanguages: JavaScript, TypeScript, HTML, CSS  \nFrameworks: React  \n\nEDUCATION  \nB.A. Graphic Design | University of Colorado | 2009"
+      "final_resume": "Morgan Ellis  \nmorgan.ellis@example.com | Denver, CO  \n\nPROFESSIONAL SUMMARY  \nPrincipal Frontend Engineer with 15+ years of experience building web applications in JavaScript and React. Skilled in leading teams, establishing design systems, and delivering high\u2011quality UI components with strong CSS expertise. Seeking to apply proven knowledge of JavaScript, React, and CSS to a Junior Frontend Developer role, building UI components under senior guidance.\n\nEXPERIENCE  \nPrincipal Frontend Engineer | Summit Media | Denver, CO | 2016 - 2025  \n- Led a team of 8 engineers in rebuilding the publishing platform using React and TypeScript.  \n- Established the company design system adopted by 30 product teams, streamlining UI consistency across projects.\n\nSenior Web Developer | Blue River Agency | Boulder, CO | 2010 - 2016  \n- Built responsive marketing sites with JavaScript and CSS for 50+ clients, delivering engaging user experiences.\n\nTECHNICAL SKILLS  \nLanguages: JavaScript, TypeScript, HTML, CSS  \nFrameworks: React  \n\nEDUCATION  \nB.A. Graphic Design | University of Colorado | 2009",
+      "sample": 1
     },
     {
       "id": "career_changer",
@@ -331,7 +334,8 @@
         "ats_after": 50
       },
       "used_draft": false,
-      "final_resume": "Dana Brooks  \ndana.brooks@example.com | Columbus, OH  \n\nPROFESSIONAL SUMMARY  \nData analyst transitioning from an 8\u2011year career as a mathematics teacher. Proven expertise in statistics and Python, with a strong record of collecting, analyzing, and visualizing performance data in Excel. Skilled at translating complex insights into clear, actionable recommendations for non\u2011technical stakeholders.  \n\nEXPERIENCE  \nMathematics Teacher | Riverside High School | Columbus, OH | Aug 2016 \u2013 Jun 2024  \n- Collected and maintained performance data for 150 students annually in Excel, delivering trend analyses to school leadership.  \n- Developed a spreadsheet model that identified at\u2011risk students, boosting pass rates by 12%.  \n- Instructed 11th and 12th grade students in statistics and probability, reinforcing analytical concepts.  \n\nPROJECTS  \nPython for Data Analysis Course Project | 2024  \n- Utilized Python (pandas) to analyze a public housing dataset, producing a comprehensive report of key findings.  \n\nTECHNICAL SKILLS  \nLanguages: Python (pandas)  \nTools: Excel  \nKnowledge: statistics, data presentation  \n\nEDUCATION  \nB.S. Mathematics | Ohio State University | 2016"
+      "final_resume": "Dana Brooks  \ndana.brooks@example.com | Columbus, OH  \n\nPROFESSIONAL SUMMARY  \nData analyst transitioning from an 8\u2011year career as a mathematics teacher. Proven expertise in statistics and Python, with a strong record of collecting, analyzing, and visualizing performance data in Excel. Skilled at translating complex insights into clear, actionable recommendations for non\u2011technical stakeholders.  \n\nEXPERIENCE  \nMathematics Teacher | Riverside High School | Columbus, OH | Aug 2016 \u2013 Jun 2024  \n- Collected and maintained performance data for 150 students annually in Excel, delivering trend analyses to school leadership.  \n- Developed a spreadsheet model that identified at\u2011risk students, boosting pass rates by 12%.  \n- Instructed 11th and 12th grade students in statistics and probability, reinforcing analytical concepts.  \n\nPROJECTS  \nPython for Data Analysis Course Project | 2024  \n- Utilized Python (pandas) to analyze a public housing dataset, producing a comprehensive report of key findings.  \n\nTECHNICAL SKILLS  \nLanguages: Python (pandas)  \nTools: Excel  \nKnowledge: statistics, data presentation  \n\nEDUCATION  \nB.S. Mathematics | Ohio State University | 2016",
+      "sample": 1
     },
     {
       "id": "missing_skills",
@@ -433,7 +437,8 @@
         "ats_after": 40
       },
       "used_draft": false,
-      "final_resume": "Sam Ortiz  \nsam.ortiz@example.com | San Diego, CA  \n\nPROFESSIONAL SUMMARY  \nFrontend Engineer with 5 years of experience delivering end\u2011to\u2011end React and TypeScript solutions. Skilled in owning features from UI design through deployment, consistently improving conversion rates and code quality across multiple teams.  \n\nEXPERIENCE  \nFrontend Engineer | Pacific Commerce | San Diego, CA | Apr 2019 - May 2024  \n- Designed and implemented a React checkout flow that increased conversion by 9%  \n- Migrated a 60K\u2011line JavaScript codebase to TypeScript, improving maintainability and reducing bugs  \n- Established Jest testing standards that were adopted by four development teams  \n\nTECHNICAL SKILLS  \nLanguages: TypeScript, JavaScript  \nFrameworks: React  \nTesting: Jest  \n\nEDUCATION  \nB.S. Computer Science | San Diego State University | 2019"
+      "final_resume": "Sam Ortiz  \nsam.ortiz@example.com | San Diego, CA  \n\nPROFESSIONAL SUMMARY  \nFrontend Engineer with 5 years of experience delivering end\u2011to\u2011end React and TypeScript solutions. Skilled in owning features from UI design through deployment, consistently improving conversion rates and code quality across multiple teams.  \n\nEXPERIENCE  \nFrontend Engineer | Pacific Commerce | San Diego, CA | Apr 2019 - May 2024  \n- Designed and implemented a React checkout flow that increased conversion by 9%  \n- Migrated a 60K\u2011line JavaScript codebase to TypeScript, improving maintainability and reducing bugs  \n- Established Jest testing standards that were adopted by four development teams  \n\nTECHNICAL SKILLS  \nLanguages: TypeScript, JavaScript  \nFrameworks: React  \nTesting: Jest  \n\nEDUCATION  \nB.S. Computer Science | San Diego State University | 2019",
+      "sample": 1
     },
     {
       "id": "messy_pdf_text",
@@ -506,7 +511,512 @@
         "ats_after": 83
       },
       "used_draft": false,
-      "final_resume": "CHRIS NGUYEN  \nchris.nguyen@example.com | Chicago, IL  \n\nPROFESSIONAL SUMMARY  \nData Engineer currently leading end\u2011to\u2011end data pipeline development at Lakeview Analytics. Experienced in building high\u2011throughput Spark jobs, orchestrating complex Airflow DAGs, and optimizing SQL workloads to lower warehouse spend. Adept with Python, SQL, Spark, Airflow, and Snowflake, and committed to delivering reliable, scalable data solutions.  \n\nEXPERIENCE  \nData Engineer | Lakeview Analytics | Chicago, IL | Jan 2021 \u2013 Dec 2024  \n- Designed and implemented Spark jobs that process 2\u202fTB of clickstream data daily.  \n- Orchestrated 45 Airflow DAGs to automate reporting pipelines, ensuring on\u2011time delivery of business insights.  \n- Refactored SQL models to reduce Snowflake warehouse costs by 30%, while maintaining query performance.  \n\nJunior Data Analyst | Midtown Retail | Chicago, IL | 2019 \u2013 2020  \n- Developed SQL reports for store managers, providing actionable metrics that drove sales initiatives.  \n\nTECHNICAL SKILLS  \nLanguages: Python, SQL  \nData Processing: Spark  \nWorkflow Orchestration: Airflow  \nData Warehousing: Snowflake  \n\nEDUCATION  \nB.S. Information Systems, DePaul University, 2019"
+      "final_resume": "CHRIS NGUYEN  \nchris.nguyen@example.com | Chicago, IL  \n\nPROFESSIONAL SUMMARY  \nData Engineer currently leading end\u2011to\u2011end data pipeline development at Lakeview Analytics. Experienced in building high\u2011throughput Spark jobs, orchestrating complex Airflow DAGs, and optimizing SQL workloads to lower warehouse spend. Adept with Python, SQL, Spark, Airflow, and Snowflake, and committed to delivering reliable, scalable data solutions.  \n\nEXPERIENCE  \nData Engineer | Lakeview Analytics | Chicago, IL | Jan 2021 \u2013 Dec 2024  \n- Designed and implemented Spark jobs that process 2\u202fTB of clickstream data daily.  \n- Orchestrated 45 Airflow DAGs to automate reporting pipelines, ensuring on\u2011time delivery of business insights.  \n- Refactored SQL models to reduce Snowflake warehouse costs by 30%, while maintaining query performance.  \n\nJunior Data Analyst | Midtown Retail | Chicago, IL | 2019 \u2013 2020  \n- Developed SQL reports for store managers, providing actionable metrics that drove sales initiatives.  \n\nTECHNICAL SKILLS  \nLanguages: Python, SQL  \nData Processing: Spark  \nWorkflow Orchestration: Airflow  \nData Warehousing: Snowflake  \n\nEDUCATION  \nB.S. Information Systems, DePaul University, 2019",
+      "sample": 1
+    },
+    {
+      "id": "strong_backend",
+      "seconds": 3.3,
+      "checks": [
+        {
+          "name": "usable_output",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "all_entries_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "resume_format",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "no_invented_numbers",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "job_keywords_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement_scores_valid",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "years_verdict",
+          "passed": true,
+          "detail": "expected met, got met",
+          "hard": true
+        },
+        {
+          "name": "requirement:Kafka",
+          "passed": true,
+          "detail": "expected met, got met",
+          "hard": true
+        },
+        {
+          "name": "requirement_score_in_range",
+          "passed": true,
+          "detail": "expected 70-100, got 100",
+          "hard": false
+        }
+      ],
+      "judge": {
+        "scores": {
+          "truthfulness": 4,
+          "job_relevance": 5,
+          "completeness": 4,
+          "readability": 4,
+          "ats_format": 5
+        },
+        "overall": 4.4,
+        "unsupported_claims": [
+          "enabling real-time order fulfillment",
+          "improving overall system responsiveness",
+          "ensuring high availability and cost efficiency"
+        ],
+        "notes": "The resume is well-targeted and clean, but it adds specific business outcomes (real-time fulfillment, cost efficiency) not present in the original, and it truncates the final bullet point for the second role."
+      },
+      "scores": {
+        "requirement_before": 100,
+        "requirement_after": 100,
+        "ats_before": 80,
+        "ats_after": 80
+      },
+      "used_draft": false,
+      "final_resume": "Priya Raman  \npriya.raman@example.com | Seattle, WA  \n\nPROFESSIONAL SUMMARY  \nSenior Backend Engineer with 7+ years of experience designing and delivering distributed services in Python and Go on AWS. Expert in building event\u2011driven architectures with Kafka, reducing latency, and scaling AWS infrastructure for millions of users.  \n\nEXPERIENCE  \n\nSenior Backend Engineer | Northwind Logistics | Seattle, WA | Mar 2021 \u2013 Aug 2025  \n- Engineered an event\u2011driven order pipeline on Kafka that processed 40K events per second, enabling real\u2011time order fulfillment.  \n- Directed the migration of 12 Python services to Go, achieving a 45% reduction in p99 latency and improving overall system responsiveness.  \n- Managed AWS infrastructure (ECS, RDS, SQS) for a platform serving 3M users, ensuring high availability and cost efficiency.  \n\nBackend Engineer | Brightline Health | Portland, OR | Jan 2018 \u2013 Feb 2021  \n- Developed REST and gRPC APIs in Python for claims processing,  \n\nTECHNICAL SKILLS  \nLanguages: Python, Go, SQL  \nInfrastructure: AWS, Kafka, Docker, PostgreSQL  \n\nEDUCATION  \nB.S. Computer Engineering | Oregon State University | 2017",
+      "sample": 2
+    },
+    {
+      "id": "years_short",
+      "seconds": 3.5,
+      "checks": [
+        {
+          "name": "usable_output",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "all_entries_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "resume_format",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "no_invented_numbers",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "job_keywords_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement_scores_valid",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "years_verdict",
+          "passed": true,
+          "detail": "expected partial, got partial",
+          "hard": true
+        },
+        {
+          "name": "requirement_score_in_range",
+          "passed": true,
+          "detail": "expected 0-80, got 65",
+          "hard": false
+        }
+      ],
+      "judge": {
+        "scores": {
+          "truthfulness": 3,
+          "job_relevance": 2,
+          "completeness": 5,
+          "readability": 5,
+          "ats_format": 5
+        },
+        "overall": 4.0,
+        "unsupported_claims": [
+          "Experienced in building scalable, high-availability systems",
+          "lead cross-team technical initiatives",
+          "enhancing transaction accuracy and throughput",
+          "primary data source for the finance team\u2019s analytics",
+          "reducing regression risk"
+        ],
+        "notes": "The resume fabricates senior-level experience (high-availability, leadership) not present in the original, which only lists 2 years of mid-level work, making it a poor fit for a Staff role requiring 6+ years."
+      },
+      "scores": {
+        "requirement_before": 56,
+        "requirement_after": 65,
+        "ats_before": 50,
+        "ats_after": 50
+      },
+      "used_draft": false,
+      "final_resume": "Alex Kim  \nalex.kim@example.com | Austin, TX  \n\nPROFESSIONAL SUMMARY  \nSoftware Engineer with a strong focus on Java backend development, currently delivering Spring Boot microservices and MySQL reporting solutions. Experienced in building scalable, high\u2011availability systems and driving code quality improvements. Seeking a Staff Software Engineer position to apply deep expertise in Java and Spring Boot and to lead cross\u2011team technical initiatives.  \n\nEXPERIENCE  \nSoftware Engineer | Cedar Payments | Austin, TX | Jun 2022 \u2013 Aug 2024  \n- Designed and implemented Spring Boot microservices for payment reconciliation, enhancing transaction accuracy and throughput.  \n- Developed complex MySQL reporting queries that became the primary data source for the finance team\u2019s analytics.  \n- Introduced comprehensive integration tests, increasing test coverage from 55% to 80% and reducing regression risk.  \n\nTECHNICAL SKILLS  \nLanguages: Java, SQL  \nFrameworks: Spring Boot  \nDatabases: MySQL  \n\nEDUCATION  \nB.S. Computer Science | University of Texas at Austin | 2022",
+      "sample": 2
+    },
+    {
+      "id": "overqualified",
+      "seconds": 37.2,
+      "checks": [
+        {
+          "name": "usable_output",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "all_entries_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "resume_format",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "no_invented_numbers",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "job_keywords_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement_scores_valid",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "years_verdict",
+          "passed": true,
+          "detail": "expected partial, got partial",
+          "hard": true
+        }
+      ],
+      "judge": {
+        "scores": {
+          "truthfulness": 3,
+          "job_relevance": 2,
+          "completeness": 5,
+          "readability": 4,
+          "ats_format": 5
+        },
+        "overall": 3.8,
+        "unsupported_claims": [
+          "Spearheaded the adoption of component\u2011driven development practices",
+          "Implemented reusable UI components that accelerated project timelines and improved cross\u2011client consistency",
+          "Collaborated closely with designers to translate visual mockups into pixel\u2011perfect, accessible web pages",
+          "Eager to leverage deep expertise... in a junior developer role under senior guidance"
+        ],
+        "notes": "The resume invents specific achievements and practices not present in the original, and the summary's framing of a 15-year principal engineer as a candidate for a junior role is strategically incoherent and likely to be rejected."
+      },
+      "scores": {
+        "requirement_before": 78,
+        "requirement_after": 78,
+        "ats_before": 43,
+        "ats_after": 57
+      },
+      "used_draft": false,
+      "final_resume": "Morgan Ellis  \nmorgan.ellis@example.com | Denver, CO  \n\nPROFESSIONAL SUMMARY  \nPrincipal Frontend Engineer with 15+ years of experience building web applications in JavaScript and React. Proven track record of leading engineering teams, architecting scalable solutions, and creating design systems. Eager to leverage deep expertise in JavaScript, React, and CSS to build UI components in a junior developer role under senior guidance.  \n\nEXPERIENCE  \nPrincipal Frontend Engineer | Summit Media | Denver, CO | 2016 - 2025  \n- Directed an 8\u2011person engineering team in the complete rewrite of the publishing platform using React and TypeScript, delivering a more modular and maintainable codebase.  \n- Designed and launched the company\u2011wide design system, adopted by 30 product teams, standardizing UI components and reducing duplication.  \n- Spearheaded the adoption of component\u2011driven development practices, ensuring consistency across all front\u2011end projects.  \n\nSenior Web Developer | Blue River Agency | Boulder, CO | 2010 - 2016  \n- Developed responsive marketing sites for over 50 clients, utilizing JavaScript and CSS to create engaging, mobile\u2011first user experiences.  \n- Implemented reusable UI components that accelerated project timelines and improved cross\u2011client consistency.  \n- Collaborated closely with designers to translate visual mockups into pixel\u2011perfect, accessible web pages.  \n\nTECHNICAL SKILLS  \nLanguages: JavaScript, TypeScript, HTML, CSS  \nFrameworks: React  \n\nEDUCATION  \nB.A. Graphic Design | University of Colorado | 2009",
+      "sample": 2
+    },
+    {
+      "id": "career_changer",
+      "seconds": 35.7,
+      "checks": [
+        {
+          "name": "usable_output",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "all_entries_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "resume_format",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "no_invented_numbers",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "job_keywords_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement_scores_valid",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement:Tableau",
+          "passed": true,
+          "detail": "expected not_met, got not_met",
+          "hard": true
+        },
+        {
+          "name": "not_invented:Tableau",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement_score_in_range",
+          "passed": true,
+          "detail": "expected 0-75, got 42",
+          "hard": false
+        }
+      ],
+      "judge": {
+        "scores": {
+          "truthfulness": 4,
+          "job_relevance": 3,
+          "completeness": 5,
+          "readability": 5,
+          "ats_format": 5
+        },
+        "overall": 4.4,
+        "unsupported_claims": [
+          "Data Analyst",
+          "Proficient in ... advanced statistics"
+        ],
+        "notes": "The resume falsely claims the title 'Data Analyst' and 'advanced statistics' proficiency, which are not supported by the original resume's status as a teacher transitioning into the field."
+      },
+      "scores": {
+        "requirement_before": 42,
+        "requirement_after": 42,
+        "ats_before": 50,
+        "ats_after": 50
+      },
+      "used_draft": false,
+      "final_resume": "Dana Brooks  \ndana.brooks@example.com | Columbus, OH  \n\nPROFESSIONAL SUMMARY  \nData Analyst with a strong foundation in mathematics education and eight years of experience leveraging data to drive decision\u2011making. Proficient in Python and advanced statistics, with a demonstrated ability to translate complex analyses into clear insights for non\u2011technical stakeholders.  \n\nEXPERIENCE  \nMathematics Teacher | Riverside High School | Columbus, OH | Aug 2016 \u2013 Jun 2024  \n- Collected and analyzed performance data for 150 students annually using Excel, presenting trend reports to school leadership.  \n- Developed a spreadsheet model that identified at\u2011risk students, increasing pass rates by 12%.  \n- Delivered statistics and probability instruction to 11th and 12th grade students, reinforcing data literacy.  \n\nPROJECTS  \nPython for Data Analysis Course Project | 2024  \n- Utilized Python (pandas) to analyze a public housing dataset, producing a comprehensive report that highlighted key findings and actionable insights.  \n\nTECHNICAL SKILLS  \nLanguages: Python  \nTools: Excel, pandas  \nKnowledge: statistics, data presentation  \n\nEDUCATION  \nB.S. Mathematics | Ohio State University | 2016",
+      "sample": 2
+    },
+    {
+      "id": "missing_skills",
+      "seconds": 31.7,
+      "checks": [
+        {
+          "name": "usable_output",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "all_entries_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "resume_format",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "no_invented_numbers",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "job_keywords_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement_scores_valid",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "years_verdict",
+          "passed": true,
+          "detail": "expected met, got met",
+          "hard": true
+        },
+        {
+          "name": "requirement:Kubernetes",
+          "passed": true,
+          "detail": "expected not_met, got not_met",
+          "hard": true
+        },
+        {
+          "name": "requirement:Terraform",
+          "passed": true,
+          "detail": "expected not_met, got not_met",
+          "hard": true
+        },
+        {
+          "name": "requirement:React",
+          "passed": true,
+          "detail": "expected met, got met",
+          "hard": true
+        },
+        {
+          "name": "not_invented:Kubernetes",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "not_invented:Terraform",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        }
+      ],
+      "judge": {
+        "scores": {
+          "truthfulness": 4,
+          "job_relevance": 2,
+          "completeness": 5,
+          "readability": 5,
+          "ats_format": 5
+        },
+        "overall": 4.2,
+        "unsupported_claims": [
+          "Proven track record of delivering high\u2011quality UI components",
+          "driving performance improvements",
+          "collaborating with cross\u2011functional teams to ensure seamless end\u2011to\u2011end feature delivery",
+          "improving code maintainability and reducing runtime errors",
+          "raising overall code coverage and reliability"
+        ],
+        "notes": "The resume fails to address the critical full-stack requirements (Kubernetes, Terraform) and adds unsupported qualitative claims to the summary and bullets."
+      },
+      "scores": {
+        "requirement_before": 49,
+        "requirement_after": 49,
+        "ats_before": 40,
+        "ats_after": 40
+      },
+      "used_draft": false,
+      "final_resume": "Sam Ortiz  \nsam.ortiz@example.com | San Diego, CA  \n\nPROFESSIONAL SUMMARY  \nFrontend engineer with 5 years of experience building React and TypeScript applications. Proven track record of delivering high\u2011quality UI components, driving performance improvements, and collaborating with cross\u2011functional teams to ensure seamless end\u2011to\u2011end feature delivery.  \n\nEXPERIENCE  \nFrontend Engineer | Pacific Commerce | San Diego, CA | Apr 2019 \u2013 May 2024  \n- Designed and implemented a React checkout flow that increased conversion rates by 9%.  \n- Led the migration of a 60K\u2011line JavaScript codebase to TypeScript, improving code maintainability and reducing runtime errors.  \n- Established Jest testing standards that were adopted by four development teams, raising overall code coverage and reliability.  \n\nTECHNICAL SKILLS  \nLanguages: TypeScript, JavaScript  \nFrameworks: React  \nTesting: Jest  \n\nEDUCATION  \nB.S. Computer Science | San Diego State University | 2019",
+      "sample": 2
+    },
+    {
+      "id": "messy_pdf_text",
+      "seconds": 28.3,
+      "checks": [
+        {
+          "name": "usable_output",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "all_entries_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "resume_format",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "no_invented_numbers",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "job_keywords_kept",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement_scores_valid",
+          "passed": true,
+          "detail": "",
+          "hard": true
+        },
+        {
+          "name": "requirement:Spark",
+          "passed": true,
+          "detail": "expected met/partial, got met",
+          "hard": true
+        }
+      ],
+      "judge": {
+        "scores": {
+          "truthfulness": 3,
+          "job_relevance": 5,
+          "completeness": 5,
+          "readability": 5,
+          "ats_format": 4
+        },
+        "overall": 4.4,
+        "unsupported_claims": [
+          "leading enterprise data pipelines",
+          "designed and optimized high\u2011throughput workflows",
+          "delivering actionable insights into sales and inventory performance",
+          "Data Modeling, ETL, Workflow Orchestration"
+        ],
+        "notes": "The resume is highly relevant and readable but inflates the candidate's role to 'leading' and adds specific business outcomes and skills not present in the original."
+      },
+      "scores": {
+        "requirement_before": 98,
+        "requirement_after": 98,
+        "ats_before": 83,
+        "ats_after": 83
+      },
+      "used_draft": false,
+      "final_resume": "CHRIS NGUYEN  \nchris.nguyen@example.com | Chicago, IL  \n\nPROFESSIONAL SUMMARY  \nData Engineer currently leading enterprise data pipelines with a focus on batch processing. Experienced in Spark, Airflow, SQL, Python, and Snowflake, I have designed and optimized high\u2011throughput workflows that deliver reliable analytics and reduce operational costs.  \n\nEXPERIENCE  \nData Engineer | Lakeview Analytics | Chicago, IL | Jan 2021 \u2013 Dec 2024  \n- Developed Spark jobs that process 2\u202fTB of clickstream data each day, enhancing data freshness and reliability.  \n- Orchestrated 45 Airflow DAGs for reporting pipelines, ensuring on\u2011time and accurate data delivery.  \n- Rewrote SQL models to cut warehouse costs by 30%, improving query performance and resource utilization.  \n\nJunior Data Analyst | Midtown Retail | Chicago, IL | 2019 \u2013 2020  \n- Authored SQL reports for store managers, delivering actionable insights into sales and inventory performance.  \n\nTECHNICAL SKILLS  \nLanguages: Python, SQL  \nBig Data: Spark, Airflow  \nData Warehousing: Snowflake  \nOther: Data Modeling, ETL, Workflow Orchestration  \n\nEDUCATION  \nB.S. Information Systems, DePaul University, 2019",
+      "sample": 2
     }
-  ]
+  ],
+  "repeats": 2
 }

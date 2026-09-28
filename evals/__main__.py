@@ -31,7 +31,8 @@ def print_report(report: dict):
     for case in report["cases"]:
         hard = [c for c in case["checks"] if c["hard"]]
         sc = case.get("scores", {})
-        print(f"{case['id']:<18}{sum(c['passed'] for c in hard):>5}/{len(hard):<3}{_fmt(case['judge'].get('overall'))}"
+        label = case["id"] + (f" #{case['sample']}" if report.get("repeats", 1) > 1 else "")
+        print(f"{label:<18}{sum(c['passed'] for c in hard):>5}/{len(hard):<3}{_fmt(case['judge'].get('overall'))}"
               f"{_fmt(sc.get('requirement_before'), 10)} → {_fmt(sc.get('requirement_after'), 3)}"
               f"{_fmt(sc.get('ats_before'), 13)} → {_fmt(sc.get('ats_after'), 3)}")
         for c in case["checks"]:
@@ -62,6 +63,8 @@ def main_cli(argv=None) -> int:
         p = sub.add_parser(name)
         p.add_argument("--prompts", default=main.PROMPT_VERSION, help="prompt version folder (default: live version)")
         p.add_argument("--cases", help="comma-separated case ids (default: all)")
+        p.add_argument("--repeats", type=int, default=runner.DEFAULT_REPEATS,
+                       help=f"samples per case (default: {runner.DEFAULT_REPEATS}; more = steadier, slower)")
     sub.choices["run"].add_argument("--save-baseline", action="store_true", help="store the result as the baseline")
     sub.choices["run"].add_argument("--refresh-requirements", action="store_true",
                                     help="re-extract each case's job requirements instead of using the frozen lists")
@@ -70,6 +73,7 @@ def main_cli(argv=None) -> int:
     compare.add_argument("--baseline", required=True, help="baseline prompt version, e.g. v1")
     compare.add_argument("--candidate", required=True, help="candidate prompt version, e.g. v2")
     compare.add_argument("--cases", help="comma-separated case ids (default: all)")
+    compare.add_argument("--repeats", type=int, default=runner.DEFAULT_REPEATS, help="samples per case")
     args = parser.parse_args(argv)
 
     if not os.getenv("GROQ_API_KEY"):
@@ -80,8 +84,8 @@ def main_cli(argv=None) -> int:
     try:
         if args.command == "compare":
             cache = {}  # the original resume's verdicts are identical for both versions — judge them once
-            base = runner.run_suite(args.baseline, case_ids, eval_cache=cache)
-            cand = runner.run_suite(args.candidate, case_ids, eval_cache=cache)
+            base = runner.run_suite(args.baseline, case_ids, eval_cache=cache, repeats=args.repeats)
+            cand = runner.run_suite(args.candidate, case_ids, eval_cache=cache, repeats=args.repeats)
             for report in (base, cand):
                 runner.save(report, RESULTS_DIR / f"{report['prompt_version']}.json")
                 print_report(report)
@@ -92,7 +96,7 @@ def main_cli(argv=None) -> int:
                 print(f"  - {problem}")
             return 0
 
-        report = runner.run_suite(args.prompts, case_ids,
+        report = runner.run_suite(args.prompts, case_ids, repeats=args.repeats,
                                   refresh_requirements=getattr(args, "refresh_requirements", False))
         runner.save(report, RESULTS_DIR / f"{args.prompts}.json")
         print_report(report)

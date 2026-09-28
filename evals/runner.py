@@ -16,12 +16,16 @@ REQUIREMENTS_PATH = Path(__file__).resolve().parent / "requirements.json"
 
 # Quality gate: the candidate fails if any hard check fails, or if it drops more than these margins below the
 # baseline (margins absorb normal run-to-run variation of LLM output).
+# Calibrated from repeated runs of the SAME prompts: with 6 cases x 2 samples, averages still move by up to
+# ~0.4 (judge overall), ~0.6 (truthfulness), and ~5 (requirement match) from randomness alone. Tighter margins
+# made the gate fail on noise. Fabrication itself is caught by the deterministic hard checks, not these margins.
 GATE_MARGINS = {
-    "judge_overall": 0.3,        # 1-5 scale
-    "judge_truthfulness": 0.3,   # 1-5 scale — honesty gets its own bar
-    "requirement_after": 5,      # 0-100
-    "ats_after": 5,              # 0-100
+    "judge_overall": 0.5,        # 1-5 scale
+    "judge_truthfulness": 0.75,  # 1-5 scale — honesty gets its own bar
+    "requirement_after": 8,      # 0-100
+    "ats_after": 5,              # 0-100 (deterministic given the resume; varies only with the writer's output)
 }
+DEFAULT_REPEATS = 2  # samples per case: LLM output varies run to run, so one sample per case is too noisy
 
 
 class EvalAborted(RuntimeError):
@@ -151,16 +155,20 @@ def save_frozen_requirements(cases, path=None):
 
 
 def run_suite(prompt_version: str, case_ids=None, eval_cache=None, progress=print, judge=judge_resume,
-              refresh_requirements=False) -> dict:
+              refresh_requirements=False, repeats: int = 1) -> dict:
     cases = load_cases(case_ids)
     missing = load_frozen_requirements(cases, refresh=refresh_requirements)
     if missing:
         progress(f"Extracting requirements for: {', '.join(missing)} (will be frozen in {REQUIREMENTS_PATH.name})")
     eval_cache = {} if eval_cache is None else eval_cache
     results = []
-    for i, case in enumerate(cases, start=1):
-        progress(f"[{prompt_version}] {i}/{len(cases)} {case['id']} ...")
-        results.append(run_case(case, prompt_version, eval_cache, judge=judge, progress=progress))
+    for sample in range(1, repeats + 1):
+        for i, case in enumerate(cases, start=1):
+            tag = f" (sample {sample}/{repeats})" if repeats > 1 else ""
+            progress(f"[{prompt_version}] {i}/{len(cases)} {case['id']}{tag} ...")
+            result = run_case(case, prompt_version, eval_cache, judge=judge, progress=progress)
+            result["sample"] = sample
+            results.append(result)
     if missing:
         save_frozen_requirements([c for c in cases if c["id"] in missing])
     return {
@@ -168,9 +176,21 @@ def run_suite(prompt_version: str, case_ids=None, eval_cache=None, progress=prin
         "model": main.GROQ_MODEL,
         "judge_model": JUDGE_MODEL,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "repeats": repeats,
         "summary": summarize(results),
         "cases": results,
     }
+
+
+def merge_reports(reports: list[dict]) -> dict:
+    """Combine runs of the same prompt version into one report (more samples = a steadier baseline)."""
+    versions = {r["prompt_version"] for r in reports}
+    if len(versions) != 1:
+        raise ValueError(f"Can only merge runs of one prompt version, got {sorted(versions)}")
+    cases = []
+    for sample, report in enumerate(reports, start=1):
+        cases += [{**case, "sample": sample} for case in report["cases"]]
+    return {**reports[-1], "repeats": len(reports), "summary": summarize(cases), "cases": cases}
 
 
 def gate(baseline: dict, candidate: dict, margins: dict = GATE_MARGINS) -> tuple[bool, list[str]]:

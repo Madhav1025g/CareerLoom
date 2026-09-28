@@ -100,13 +100,13 @@ def report(overall=4.0, truth=4.0, req=80, ats=70, failed_check=False):
 
 
 def test_gate_passes_within_margins():
-    assert runner.gate(report(), report(overall=3.8, req=76))[0]
+    assert runner.gate(report(), report(overall=3.6, truth=3.4, req=73))[0]  # within the noise margins
 
 
 @pytest.mark.parametrize("candidate, reason", [
     (report(failed_check=True), "check 'x' failed"),
-    (report(overall=3.5), "judge_overall dropped"),
-    (report(truth=3.6), "judge_truthfulness dropped"),
+    (report(overall=3.4), "judge_overall dropped"),
+    (report(truth=3.1), "judge_truthfulness dropped"),
     (report(req=70), "requirement_after dropped"),
 ])
 def test_gate_fails_on_regression(candidate, reason):
@@ -168,3 +168,16 @@ def test_per_minute_rate_limit_waits_and_retries(pipeline, monkeypatch):
     result = runner.run_case({"id": "x", "request": dict(REQUEST), "expect": {}}, "v1",
                              judge=flaky_judge, progress=lambda m: None)
     assert len(attempts) == 3 and result["judge"]["overall"] == 4.0
+
+
+def test_repeats_and_merge(pipeline, tmp_path, monkeypatch):
+    case = {"id": "fake", "request": dict(REQUEST), "expect": {}}
+    (tmp_path / "fake.json").write_text(json.dumps(case))
+    monkeypatch.setattr(runner, "CASES_DIR", tmp_path)
+    monkeypatch.setattr(runner, "REQUIREMENTS_PATH", tmp_path / "requirements.json")
+    twice = runner.run_suite("v1", progress=lambda m: None, judge=fake_judge, repeats=2)
+    assert [c["sample"] for c in twice["cases"]] == [1, 2] and twice["summary"]["cases"] == 2
+    merged = runner.merge_reports([twice, twice])
+    assert merged["repeats"] == 2 and merged["summary"]["cases"] == 4
+    with pytest.raises(ValueError):
+        runner.merge_reports([twice, {**twice, "prompt_version": "v2"}])
