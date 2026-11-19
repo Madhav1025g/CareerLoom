@@ -138,22 +138,44 @@ def test_orchestrator_without_job_description(pipeline):
     assert ats["before"]["semantic_score"] is None
     assert ats["after"]["semantic_score"] is None
 
-# ---------------------------------------------------------------- Qdrant privacy
+# ---------------------------------------------------------------- in-memory retrieval (RAG)
 
-def test_resume_chunks_are_deleted_after_request(pipeline, monkeypatch):
-    qdrant = pytest.importorskip("qdrant_client")
-    from qdrant_client import models
+def test_retrieval_ranks_resume_lines_by_similarity_to_the_job(pipeline):
+    chunks = ["Built REST APIs with Python and FastAPI on AWS",
+              "Organized the office holiday party every December",
+              "Containerized services with Docker and deployed them on AWS"]
+    top = main.retrieve_relevant_chunks(chunks, "Backend engineer: Python, FastAPI, AWS, Docker", top_k=2)
+    assert "Organized the office holiday party every December" not in top and len(top) == 2
 
-    client = qdrant.QdrantClient(":memory:")
-    client.create_collection(main.COLLECTION_NAME,
-                             vectors_config=models.VectorParams(size=FakeEmbedder.dim, distance=models.Distance.COSINE))
-    for name in ("PointStruct", "Filter", "FieldCondition", "MatchValue", "FilterSelector"):
-        monkeypatch.setattr(main, name, getattr(models, name), raising=False)
-    monkeypatch.setattr(main, "qdrant_client", client)
 
-    result = pipeline.orchestrator(dict(REQUEST), "req-8")
+def test_no_embedding_model_means_no_retrieval_and_no_semantic_score(monkeypatch):
+    monkeypatch.setattr(main, "embedding_model", None)
+    monkeypatch.setattr(main, "SEMANTIC_ENABLED", False)
+    assert main.retrieve_relevant_chunks(["Built APIs in Python"], "Python job") == []
+    assert main.semantic_ats_score("Python job", ["Built APIs in Python"]) is None
+
+
+def test_orchestrator_uses_retrieved_lines(pipeline):
+    result = pipeline.orchestrator(dict(REQUEST), "req-rag")
     assert result["rag_matches_used"] > 0
-    assert client.count(main.COLLECTION_NAME).count == 0
+
+
+def test_embedding_load_failure_does_not_crash(monkeypatch):
+    import builtins
+    real_import = builtins.__import__
+
+    def broken_import(name, *args, **kwargs):
+        if name == "sentence_transformers":
+            raise ImportError("not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(main, "embedding_model", None)
+    monkeypatch.setattr(main, "SEMANTIC_ENABLED", True)
+    monkeypatch.setattr(main, "_embedding_load_failed", False)
+    monkeypatch.setattr(builtins, "__import__", broken_import)
+    assert main.get_embedding_model() is None
+    assert main.semantic_ats_score("Python job", ["Built APIs in Python"]) is None
+
 
 # ---------------------------------------------------------------- REST API
 

@@ -13,8 +13,9 @@ import numpy as np
 import pytest
 
 # Must be set before main.py is imported — load_dotenv() never overrides existing variables.
-for var in ("QDRANT_URL", "QDRANT_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"):
+for var in ("GROQ_API_KEY", "OPENAI_API_KEY"):
     os.environ[var] = ""
+os.environ["CAREERLOOM_SEMANTIC"] = "0"  # never load the real embedding model; tests inject a fake
 os.environ["API_KEY_HERE"] = "test-key-123"
 
 ROOT = Path(__file__).resolve().parent.parent

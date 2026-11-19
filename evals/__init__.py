@@ -12,6 +12,6 @@ Usage: python -m evals --help
 """
 import os
 
-# Evals must be reproducible locally and in CI: always score without Qdrant/embeddings (the semantic part of the
-# ATS score is skipped identically everywhere). load_dotenv() in main.py never overrides a variable already set.
-os.environ["QDRANT_URL"] = ""
+# Evals must be reproducible locally and in CI: always score without embeddings (the semantic part of the ATS
+# score is skipped identically everywhere). load_dotenv() in main.py never overrides a variable already set.
+os.environ["CAREERLOOM_SEMANTIC"] = "0"

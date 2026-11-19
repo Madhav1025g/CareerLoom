@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 import uuid
 
@@ -50,43 +51,39 @@ groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key, max_retries=4) if (Groq and groq_api_key) else None
 
 #----------------------
-# RAG CONFIG
+# RAG CONFIG — embeddings for semantic job matching (in memory; no external vector database)
 #----------------------
 
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-COLLECTION_NAME = "resume_chunks"
-EMBEDDING_DIM = 384  # all-MiniLM-L6-v2 output size
+EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+# Set CAREERLOOM_SEMANTIC=0 to turn semantic matching off (tests and evals do, for speed and reproducibility).
+SEMANTIC_ENABLED = os.getenv("CAREERLOOM_SEMANTIC", "1") != "0"
 
-embedding_model = None
-qdrant_client = None
+embedding_model = None          # loaded on first use; tests replace it with a fake
+_embedding_load_failed = False
+_embedding_lock = threading.Lock()
 
-# Only load the heavy embedding/vector libraries if Qdrant is actually configured.
-if QDRANT_URL:
-    from sentence_transformers import SentenceTransformer
-    from qdrant_client import QdrantClient
-    from qdrant_client.models import (
-        Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, FilterSelector,
-    )
 
-    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-    qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-    existing_collections = [c.name for c in qdrant_client.get_collections().collections]
-    if COLLECTION_NAME not in existing_collections:
-        qdrant_client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
-        )
+def get_embedding_model():
+    """Load the embedding model once, on first use (thread-safe). If it can't load, the app keeps working without
+    the semantic part of the ATS score instead of failing to start."""
+    global embedding_model, _embedding_load_failed
+    if embedding_model is not None or not SEMANTIC_ENABLED or _embedding_load_failed:
+        return embedding_model
+    with _embedding_lock:
+        if embedding_model is None and not _embedding_load_failed:
+            try:
+                from sentence_transformers import SentenceTransformer
+                embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+            except Exception as exc:
+                _embedding_load_failed = True
+                print(f"Semantic matching disabled — embedding model failed to load ({type(exc).__name__})")
+    return embedding_model
 
-    # Qdrant requires a payload index to filter by a field (e.g. request_id).
-    try:
-        qdrant_client.create_payload_index(
-            collection_name=COLLECTION_NAME,
-            field_name="request_id",
-            field_schema="keyword",
-        )
-    except Exception as exc:
-        print(f"Payload index setup skipped (likely already exists): {exc}")
+
+def preload_embedding_model():
+    """Start loading the model in the background (called once by the web app at startup)."""
+    if SEMANTIC_ENABLED and embedding_model is None:
+        threading.Thread(target=get_embedding_model, daemon=True).start()
 
 #----------------------
 # REQUEST MODEL
@@ -333,68 +330,25 @@ def chunk_resume(resume_text: str) -> list[str]:
     return chunks
 
 
-def embed_text(text: str) -> list[float]:
-    if embedding_model is None:
+def _cosine_similarities(query_vector, vectors):
+    import numpy as np
+    vectors = np.asarray(vectors, dtype=float)
+    query = np.asarray(query_vector, dtype=float)
+    norms = np.linalg.norm(vectors, axis=1) * np.linalg.norm(query)
+    return (vectors @ query) / np.where(norms == 0, 1, norms)
+
+
+def retrieve_relevant_chunks(chunks: list[str], job_description: str, top_k: int = 5) -> list[str]:
+    """
+    Semantic search (the retrieval step of RAG): the resume lines most similar in meaning to the job description.
+    Runs in memory, so resume content never leaves the app server for an external database.
+    """
+    model = get_embedding_model()
+    if model is None or not chunks or not job_description:
         return []
-    return embedding_model.encode(text).tolist()
-
-
-def store_resume_chunks(request_id: str, chunks: list[str]):
-    """Embed and upsert resume chunks into Qdrant, tagged with request_id."""
-    if qdrant_client is None or not chunks:
-        log_event("Qdrant not configured or no chunks to store — skipping vector storage")
-        return
-
-    points = []
-    for chunk in chunks:
-        vector = embed_text(chunk)
-        points.append(
-            PointStruct(
-                id=str(uuid.uuid4()),
-                vector=vector,
-                payload={"request_id": request_id, "text": chunk},
-            )
-        )
-
-    qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
-    log_event(f"{request_id}: stored {len(points)} resume chunks in Qdrant")
-
-
-def delete_resume_chunks(request_id: str):
-    """Remove this request's resume chunks from Qdrant so no resume content outlives the request."""
-    if qdrant_client is None:
-        return
-    try:
-        qdrant_client.delete(
-            collection_name=COLLECTION_NAME,
-            points_selector=FilterSelector(
-                filter=Filter(must=[FieldCondition(key="request_id", match=MatchValue(value=request_id))])
-            ),
-        )
-        log_event(f"{request_id}: deleted resume chunks from Qdrant")
-    except Exception as exc:
-        log_event(f"{request_id}: WARNING — failed to delete resume chunks ({type(exc).__name__})")
-
-
-def retrieve_relevant_chunks(request_id: str, job_description: str, top_k: int = 5) -> list[str]:
-    """Semantic search: find resume chunks most relevant to the job description."""
-    if qdrant_client is None or not job_description:
-        return []
-
-    query_vector = embed_text(job_description)
-
-    results = qdrant_client.query_points(
-        collection_name=COLLECTION_NAME,
-        query=query_vector,
-        query_filter=Filter(
-            must=[FieldCondition(key="request_id", match=MatchValue(value=request_id))]
-        ),
-        limit=top_k,
-    )
-
-    matched_chunks = [point.payload["text"] for point in results.points]
-    log_event(f"{request_id}: retrieved {len(matched_chunks)} relevant chunks via vector search")
-    return matched_chunks
+    similarities = _cosine_similarities(model.encode(job_description), model.encode(chunks))
+    ranked = sorted(range(len(chunks)), key=lambda i: similarities[i], reverse=True)[:top_k]
+    return [chunks[i] for i in ranked]
 
 
 def semantic_ats_score(job_description: str, chunks: list[str], top_k: int = 5) -> int:
@@ -404,15 +358,12 @@ def semantic_ats_score(job_description: str, chunks: list[str], top_k: int = 5) 
     (long, formal) and a resume bullet (short, specific) rarely exceeds ~0.6 even for a strong
     match, so the raw value is rescaled onto a more intuitive 0-100 "match quality" range.
     """
-    if not job_description or not chunks or embedding_model is None:
+    model = get_embedding_model()
+    if not job_description or not chunks or model is None:
         return None
 
-    jd_vector = embedding_model.encode(job_description)
-    chunk_vectors = embedding_model.encode(chunks)
-
-    import numpy as np
     similarities = sorted(
-        (float(np.dot(jd_vector, cv) / (np.linalg.norm(jd_vector) * np.linalg.norm(cv))) for cv in chunk_vectors),
+        (float(x) for x in _cosine_similarities(model.encode(job_description), model.encode(chunks))),
         reverse=True,
     )[:top_k]
     avg_similarity = sum(similarities) / len(similarities)
@@ -1324,21 +1275,15 @@ def orchestrator(user_request, request_id, progress_callback=None, prompt_versio
         if progress_callback:
             progress_callback(message)
 
-    # RAG step — chunk + store resume, then retrieve JD-relevant chunks
-    matched_chunks = []
+    # RAG step — find the resume lines most relevant to the job (in-memory vector search)
     resume_text = user_request.get("resume_text")
     job_description = user_request.get("job_description")
-
-    try:
-        notify("Reading your resume...")
-        if resume_text:
-            store_resume_chunks(request_id, chunk_resume(resume_text))
-            if job_description:
-                notify("Matching your resume to the job description...")
-                matched_chunks = retrieve_relevant_chunks(request_id, job_description)
-    finally:
-        # Resume chunks are only needed for retrieval — never keep them beyond this request.
-        delete_resume_chunks(request_id)
+    notify("Reading your resume...")
+    matched_chunks = []
+    if resume_text and job_description:
+        notify("Matching your resume to the job description...")
+        matched_chunks = retrieve_relevant_chunks(chunk_resume(resume_text), job_description)
+        log_event(f"{request_id}: retrieved {len(matched_chunks)} relevant resume lines")
 
     # The analyzer and cover letter only need the original resume, so they run in the background.
     # ATS -> writer -> optimizer must run in order: the writer targets the gaps the ATS agent finds.

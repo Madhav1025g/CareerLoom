@@ -11,7 +11,6 @@ pypdf
 python-docx
 requests
 fpdf2
-qdrant-client
 numpy
 httpx
 pytest>=8

@@ -10,5 +10,4 @@ python-docx
 requests
 fpdf2
 sentence-transformers
-qdrant-client
 numpy

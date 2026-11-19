@@ -40,7 +40,7 @@ first with its biggest gaps, and tailor for it in one click.
 flowchart LR
     U["Resume + job description"] --> UI["Streamlit UI<br/>(multi-page)"]
     UI --> O["Orchestrator"]
-    O --> RAG["RAG matching<br/>embeddings + Qdrant<br/>(deleted after each request)"]
+    O --> RAG["RAG matching<br/>Sentence-Transformers embeddings<br/>in-memory vector search"]
     O --> ATS["Requirement analysis<br/>job requirements + ATS keywords"]
     O -. parallel .-> PA["Profile analyzer"]
     O -. parallel .-> CL["Cover letter writer"]
@@ -91,7 +91,7 @@ Details are on the in-app **How we score** page.
 ## Privacy
 
 - Resume content is sent to the LLM provider (Groq, or OpenAI as a backup) only to generate results.
-- Resume chunks stored in Qdrant for matching are **deleted at the end of every request**.
+- Semantic matching runs **in memory**: resume lines are never stored in an external database.
 - Logs contain only request IDs, pipeline steps, and scores: never resume text, prompts, or API keys.
 - Anonymous counts only (generations and helpful/not-helpful ratings) via counterapi.dev.
 
@@ -100,7 +100,7 @@ Details are on the in-app **How we score** page.
 | Layer | Tools |
 |---|---|
 | Backend | Python, FastAPI, Pydantic |
-| AI / LLM | Groq (primary), OpenAI (fallback), Sentence-Transformers, Qdrant |
+| AI / LLM | Groq (primary), OpenAI (fallback), Sentence-Transformers (in-memory vector search) |
 | Frontend | Streamlit (multi-page), Altair charts |
 | Documents | pypdf, python-docx, fpdf2 |
 | Quality | pytest (121 tests), GitHub Actions CI |
@@ -137,8 +137,6 @@ Create a `.env` file (never commit it; it is in `.gitignore`):
 ```
 GROQ_API_KEY=your_groq_key
 OPENAI_API_KEY=optional_openai_fallback_key
-QDRANT_URL=your_qdrant_cluster_url
-QDRANT_API_KEY=your_qdrant_api_key
 LLM_PROVIDER=groq
 API_KEY_HERE=a_long_random_value   # protects the FastAPI endpoint
 ```

@@ -18,8 +18,8 @@ st.markdown(f"""
   edit and download them. They are discarded when your session ends (for example, when you close the tab).
 - **To generate results:** your resume and job description are sent to our AI provider,
   **Groq**, or **OpenAI** as a backup if Groq is unavailable.
-- **For job matching:** lines of your resume are briefly stored as vectors in our **Qdrant** vector database to
-  find the parts most relevant to the job. They are **deleted at the end of every request**.
+- **For job matching:** lines of your resume are turned into embeddings (numeric representations of their meaning)
+  in the app's memory to find the parts most relevant to the job. Nothing is sent to or stored in a database.
 
 ### What we don't do
 - We don't store your resume, job descriptions, or generated documents after your session.
@@ -34,7 +34,6 @@ counterapi.dev. These are plain numbers — no resume content or personal inform
 
 ### Third-party services
 - **Groq** and **OpenAI** — AI text generation
-- **Qdrant Cloud** — temporary vector search (deleted after each request)
 - **Streamlit Community Cloud** — hosts this website
 - **counterapi.dev** — anonymous usage counts
 - **Google Fonts** — loads the website's typeface
