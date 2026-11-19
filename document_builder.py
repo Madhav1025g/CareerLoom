@@ -396,3 +396,14 @@ def build_letter_docx(text: str, sender_name: str = "", template: str | None = N
             if i < len(lines) - 1:
                 run.add_break()
     return _docx_bytes(document)
+
+
+def pdf_page_count(pdf: bytes) -> int:
+    """Number of pages in a generated PDF (used to warn when a resume runs past one page)."""
+    import io
+
+    import pypdf
+    try:
+        return len(pypdf.PdfReader(io.BytesIO(pdf)).pages)
+    except Exception:
+        return 1

@@ -16,10 +16,10 @@ except Exception:
     pass
 
 from main import APP_NAME, preload_embedding_model  # noqa: E402  (must import after secrets are in the environment)
-from ui_common import apply_styles  # noqa: E402
+from ui_common import apply_styles, is_dark_theme  # noqa: E402
 
 st.set_page_config(page_title=f"{APP_NAME} | AI Resume Tailoring", page_icon="assets/favicon.png", layout="wide")
-st.logo("assets/logo.png", size="large")
+st.logo("assets/logo_dark.png" if is_dark_theme() else "assets/logo.png", size="large")
 apply_styles()
 
 
@@ -43,16 +43,21 @@ tailor_page = st.Page("app_pages/tailor.py", title="Tailor resume", icon=":mater
 compare_page = st.Page("app_pages/compare.py", title="Compare jobs", icon=":material/compare_arrows:", url_path="compare")
 score_page = st.Page("app_pages/how_we_score.py", title="How we score", icon=":material/analytics:", url_path="how-we-score")
 privacy_page = st.Page("app_pages/privacy.py", title="Privacy", icon=":material/lock:", url_path="privacy")
+terms_page = st.Page("app_pages/terms.py", title="Terms of use", icon=":material/gavel:", url_path="terms")
+contact_page = st.Page("app_pages/contact.py", title="Contact", icon=":material/mail:", url_path="contact")
 st.session_state.pages = {"tailor": tailor_page, "compare": compare_page}
 
-st.navigation([tailor_page, compare_page, score_page, privacy_page], position="top").run()
+# Main pages sit in the top bar; the legal and contact pages are grouped under "About" (a dropdown in the top bar).
+st.navigation({"": [tailor_page, compare_page, score_page], "About": [privacy_page, terms_page, contact_page]},
+              position="top").run()
 
 # ------------------------------------------------------------------
 # Footer (st.page_link keeps the session — plain <a> links would reload the app and lose results)
 # ------------------------------------------------------------------
 st.markdown('<div class="cl-footer-rule"></div>', unsafe_allow_html=True)
-copy_col, *link_cols = st.columns([4, 1.2, 1.2, 1.2], vertical_alignment="center")
+copy_col, links_col = st.columns([4, 5], vertical_alignment="center")
 copy_col.caption(f"© {date.today().year} {APP_NAME}. Built by Madhav G. "
                  "Your data is processed only to generate your results and is never stored.")
-for col, page in zip(link_cols, [compare_page, score_page, privacy_page]):
-    col.page_link(page)
+with links_col.container(horizontal=True, horizontal_alignment="right", gap="small"):
+    for page in [score_page, privacy_page, terms_page, contact_page]:
+        st.page_link(page, width="content")

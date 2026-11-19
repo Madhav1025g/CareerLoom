@@ -168,7 +168,8 @@ def test_feedback_is_recorded_once(app, monkeypatch):
     assert sent.count("feedback-helpful") == 1
 
 
-@pytest.mark.parametrize("page", ["app_pages/how_we_score.py", "app_pages/privacy.py", "app_pages/compare.py"])
+@pytest.mark.parametrize("page", ["app_pages/how_we_score.py", "app_pages/privacy.py", "app_pages/compare.py",
+                                  "app_pages/terms.py", "app_pages/contact.py"])
 def test_other_pages_render(app, page):
     app.switch_page(page).run()
     assert not app.exception
@@ -232,4 +233,30 @@ def test_compare_reuses_tailor_verdicts_for_same_resume_and_job(app, monkeypatch
     same = next(r for r in at.session_state.comparison if r["index"] == 0)
     assert same["requirement_match"] == at.session_state.last_result["workflow"]["requirement_match"]["before"]
     assert len(judge_calls) == 1  # only the new job needed judging
+    assert not at.exception
+
+
+def test_landing_faq_shows_until_results_exist(app):
+    assert any("Is my resume stored" in e.label for e in app.expander)
+    assert any("See the difference" in m.value for m in app.markdown)
+    at = generate(app)
+    assert not any("Is my resume stored" in e.label for e in at.expander)
+
+
+def test_verdict_card_summarises_results(app):
+    at = generate(app)
+    verdict = next(m.value for m in at.markdown if m.value.startswith("<div class=\"cl-verdict"))
+    assert "requirements" in verdict and "/100" in verdict
+    assert any(band in verdict for band in ("Strong match", "Good match", "Fair match", "Stretch role"))
+
+
+def test_long_resume_gets_page_warning_and_compact_fix(app):
+    at = generate(app)
+    long_resume = TAILORED_RESUME + "\nPROJECTS\n" + "\n".join(f"- Project {i}: built a data pipeline" for i in range(90))
+    at.segmented_control(key="mode_resume").set_value("Edit").run()
+    editor = next(t for t in at.text_area if t.key and t.key.startswith("editor_resume_"))
+    editor.set_value(long_resume).run()
+    assert any("PDF is" in w.value and "pages" in w.value for w in at.warning)
+    button(at, "Try the Compact template").click().run()
+    assert at.session_state.template == "Compact"
     assert not at.exception

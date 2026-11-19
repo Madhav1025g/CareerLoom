@@ -1,13 +1,24 @@
+# Light and dark themes. The app follows each visitor's system setting, and anyone can switch in
+# the menu (top right) > Settings > Theme.
 [theme]
-base = "light"
+primaryColor = "#1E3A8A"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+baseRadius = "medium"
+showWidgetBorder = true
+
+[theme.light]
 primaryColor = "#1E3A8A"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F4F6FA"
 textColor = "#111827"
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-baseRadius = "medium"
 borderColor = "#E3E7EF"
-showWidgetBorder = true
+
+[theme.dark]
+primaryColor = "#4F6FD8"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#161B26"
+textColor = "#E5E7EB"
+borderColor = "#2A3140"
 
 [client]
 toolbarMode = "viewer"

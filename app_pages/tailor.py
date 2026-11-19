@@ -21,8 +21,11 @@ from document_builder import (
     letter_to_html,
     resume_to_html,
 )
+from document_builder import pdf_page_count
 from ui_common import (
-    busy_message, chips, extract_text_from_upload, file_stem, increment_counter, record_feedback, requirement_checklist,
+    PROGRESS_STAGES, busy_message, chart_palette, chips, extract_text_from_upload, file_stem, increment_counter,
+    progress_stage, record_feedback, requirement_checklist, score_band, step_tracker_html, text_quality_issues,
+    verdict_card,
 )
 
 # ------------------------------------------------------------------
@@ -43,7 +46,7 @@ st.markdown(f"""
   </div>
   <div class="cl-feature">
     <div class="cl-feature-title">Resume, snapshot &amp; cover letter</div>
-    <div class="cl-feature-text">An {len(PIPELINE_STEPS)}-step AI pipeline tailors your resume without dropping experience, plus a half-page recruiter snapshot.</div>
+    <div class="cl-feature-text">A {len(PIPELINE_STEPS)}-step AI pipeline tailors your resume without dropping experience, plus a half-page recruiter snapshot.</div>
   </div>
   <div class="cl-feature">
     <div class="cl-feature-title">Recruiter-ready exports</div>
@@ -138,8 +141,16 @@ with left:
             uploaded_file = st.file_uploader("Upload your resume (PDF, DOCX, or TXT)", type=["pdf", "docx", "txt"])
             if uploaded_file is not None:
                 resume_text = extract_text_from_upload(uploaded_file)
-                if resume_text:
+                issues = text_quality_issues(resume_text) if resume_text else []
+                if resume_text and not issues:
                     st.success(f"Loaded {uploaded_file.name} ({len(resume_text):,} characters)")
+                elif resume_text:
+                    st.warning(f"We loaded {uploaded_file.name}, but the text may not have come through cleanly:\n\n"
+                               + "\n".join(f"- {issue}" for issue in issues)
+                               + "\n\nCheck the text below. If it looks scrambled, paste your resume with “Paste text” "
+                                 "or upload a DOCX for better results.")
+                    with st.expander("Preview the text we extracted"):
+                        st.text(resume_text[:3000] + ("\n..." if len(resume_text) > 3000 else ""))
                 else:
                     st.error("We couldn't read that file. Try a DOCX or TXT version instead.")
             elif st.session_state.resume_text_area:
@@ -152,7 +163,7 @@ with left:
 
 with right:
     with st.container(border=True):
-        st.markdown('<div class="cl-card-title">Target job <span style="font-weight:400;color:#94A3B8">(recommended)</span></div>',
+        st.markdown('<div class="cl-card-title">Target job <span class="cl-optional">(recommended)</span></div>',
                     unsafe_allow_html=True)
         job_description = st.text_area(
             "Job description",
@@ -196,30 +207,40 @@ if generate_clicked:
         request_id = str(uuid.uuid4())
 
         result = None
-        with st.status("Generating your application...", expanded=True) as status:
-            def update(msg):
-                status.update(label=msg)
-                st.write(msg)
+        tracker = st.empty()
+        stage = {"index": 0}
 
-            try:
-                result = orchestrator(user_request, request_id, progress_callback=update)
-                status.update(label="Your application is ready", state="complete", expanded=False)
-            except LLMBusyError as exc:
-                status.update(label="CareerLoom is busy", state="error")
-                st.warning(busy_message(exc))
-            except LLMUnavailableError:
-                status.update(label="Generation failed", state="error")
-                st.error("Our AI service is temporarily unavailable. Please try again in a minute.")
-            except ResumeGenerationError:
-                status.update(label="Generation failed", state="error")
-                st.error("We couldn't generate a complete resume this time. This occasionally happens with long "
-                         "resumes — please try again. This attempt didn't count toward your limit.")
-            except Exception as exc:
-                log_event(f"{request_id}: unexpected error ({type(exc).__name__})")
-                status.update(label="Generation failed", state="error")
-                st.error("Something went wrong while generating your application. Please try again.")
+        def show_progress(message: str, done: bool = False):
+            stage["index"] = progress_stage(message, stage["index"])
+            completed = len(PROGRESS_STAGES) if done else stage["index"]
+            with tracker.container(border=True):
+                st.markdown('<div class="cl-card-title">Generating your application</div>', unsafe_allow_html=True)
+                st.caption("This usually takes 30–60 seconds. Please keep this tab open.")
+                st.markdown(step_tracker_html(stage["index"], done=done), unsafe_allow_html=True)
+                st.progress(min(1.0, (completed + 0.5) / len(PROGRESS_STAGES)) if not done else 1.0,
+                            text=message)
+
+        show_progress("Starting...")
+        try:
+            result = orchestrator(user_request, request_id, progress_callback=show_progress)
+            tracker.empty()
+        except LLMBusyError as exc:
+            tracker.empty()
+            st.warning(busy_message(exc))
+        except LLMUnavailableError:
+            tracker.empty()
+            st.error("Our AI service is temporarily unavailable. Please try again in a minute.")
+        except ResumeGenerationError:
+            tracker.empty()
+            st.error("We couldn't generate a complete resume this time. This occasionally happens with long "
+                     "resumes. Please try again; this attempt didn't count toward your limit.")
+        except Exception as exc:
+            log_event(f"{request_id}: unexpected error ({type(exc).__name__})")
+            tracker.empty()
+            st.error("Something went wrong while generating your application. Please try again.")
 
         if result is not None:
+            st.toast("Your application is ready.", icon=":material/check_circle:")
             increment_counter()
             st.session_state.generation_count += 1
 
@@ -294,6 +315,8 @@ def document_panel(doc_key: str, noun: str, file_label: str, template: str, stem
                            width="stretch", key=f"docx_{doc_key}")
         st.download_button("Plain text", data=text, file_name=f"{stem}_{file_label}.txt", mime="text/plain",
                            width="stretch", key=f"txt_{doc_key}")
+        if doc_key != "cover_letter":
+            page_length_notice(pdf, noun, template)
         st.divider()
         if text != st.session_state.originals[doc_key]:
             if st.button("Undo all edits", width="stretch", key=f"reset_{doc_key}"):
@@ -301,6 +324,29 @@ def document_panel(doc_key: str, noun: str, file_label: str, template: str, stem
                 st.rerun()
         if below_downloads:
             below_downloads()
+
+
+def use_compact_template():
+    st.session_state.template = "Compact"
+
+
+def page_length_notice(pdf: bytes, noun: str, template: str):
+    """Recruiters expect one page (two for 10+ years of experience); say so when the PDF runs longer."""
+    pages = pdf_page_count(pdf)
+    years = int(st.session_state.get("last_request", {}).get("experience_years") or 0)
+    limit = 1 if noun == "recruiter snapshot" or years < 10 else 2
+    if pages <= limit:
+        st.caption(f"PDF length: {pages} page{'s' if pages > 1 else ''}")
+        return
+    advice = ("The snapshot works best on a single page." if noun == "recruiter snapshot" else
+              "Most recruiters expect one page for under 10 years of experience." if limit == 1 else
+              "Even with 10+ years of experience, recruiters rarely read past page two.")
+    st.warning(f"Your {noun} PDF is {pages} pages. {advice}", icon=":material/description:")
+    if template != "Compact":
+        st.button("Try the Compact template", on_click=use_compact_template, width="stretch",
+                  key=f"compact_{noun}")
+    else:
+        st.caption("Trim older roles or merge similar bullets with Edit to shorten it.")
 
 
 # Score changes this small are within the scorer's normal variation — don't present them as a gain or loss.
@@ -333,24 +379,25 @@ def ats_bar_chart(before: dict, after: dict):
         columns=["Measure", "Version", "Score", "Change"],
     )
     order = [m for m, _, _ in rows]
+    c = chart_palette()
     encoding = dict(
         y=alt.Y("Measure:N", sort=order, title=None, scale=alt.Scale(paddingInner=0.3),
-                axis=alt.Axis(ticks=False, domain=False, labelColor="#334155", labelFontSize=12, labelPadding=6)),
+                axis=alt.Axis(ticks=False, domain=False, labelColor=c["text"], labelFontSize=12, labelPadding=6)),
         yOffset=alt.YOffset("Version:N", sort=["Before", "After"], scale=alt.Scale(paddingInner=0.12)),
         # Extra room past 100 keeps the value labels at the bar tips inside the chart.
         x=alt.X("Score:Q", title=None, scale=alt.Scale(domain=[0, 118]),
-                axis=alt.Axis(values=[0, 50, 100], gridColor="#EEF1F5", domain=False, ticks=False, labelColor="#64748B")),
+                axis=alt.Axis(values=[0, 50, 100], gridColor=c["grid"], domain=False, ticks=False, labelColor=c["muted"])),
     )
     bars = alt.Chart(long).mark_bar(cornerRadiusEnd=4).encode(
         **encoding,
-        color=alt.Color("Version:N", scale=alt.Scale(domain=["Before", "After"], range=["#94A8D8", "#1E3A8A"]),
+        color=alt.Color("Version:N", scale=alt.Scale(domain=["Before", "After"], range=[c["before"], c["after"]]),
                         legend=alt.Legend(title=None, orient="top", direction="horizontal", labelFontSize=11,
-                                          labelColor="#334155", symbolType="square", symbolSize=70,
+                                          labelColor=c["text"], symbolType="square", symbolSize=70,
                                           labelLimit=0, columnPadding=8, symbolOffset=0, offset=4)),
         tooltip=[alt.Tooltip("Measure:N"), alt.Tooltip("Version:N", title="Resume"), alt.Tooltip("Score:Q"),
                  alt.Tooltip("Change:N", title="Change after tailoring")],
     )
-    labels = alt.Chart(long).mark_text(align="left", dx=4, fontSize=11, color="#334155").encode(
+    labels = alt.Chart(long).mark_text(align="left", dx=4, fontSize=11, color=c["text"]).encode(
         **encoding, text="Score:Q",
     )
     # Size by step (each bar 16px) so bars stay readable whatever the column width; "fit" + padding keeps
@@ -374,26 +421,27 @@ def ats_dumbbell_chart(before: dict, after: dict):
                      var_name="Version", value_name="Score")
 
     order = list(wide["Measure"])
+    c = chart_palette()
     y = alt.Y("Measure:N", sort=order, title=None,
-              axis=alt.Axis(labelFontSize=13, labelColor="#334155", ticks=False, domain=False, labelPadding=12, labelLimit=220))
+              axis=alt.Axis(labelFontSize=13, labelColor=c["text"], ticks=False, domain=False, labelPadding=12, labelLimit=220))
     x_scale = alt.Scale(domain=[0, 100])
-    x_axis = alt.Axis(values=[0, 25, 50, 75, 100], gridColor="#EEF1F5", domain=False, ticks=False,
-                      labelColor="#64748B", titleColor="#64748B", titleFontWeight="normal")
+    x_axis = alt.Axis(values=[0, 25, 50, 75, 100], gridColor=c["grid"], domain=False, ticks=False,
+                      labelColor=c["muted"], titleColor=c["muted"], titleFontWeight="normal")
 
-    rule = alt.Chart(wide).mark_rule(color="#CBD5E1", strokeWidth=2).encode(
+    rule = alt.Chart(wide).mark_rule(color=c["rule"], strokeWidth=2).encode(
         y=y, x=alt.X("Original:Q", scale=x_scale, axis=x_axis, title="Score (0–100)"), x2="Tailored:Q",
     )
-    points = alt.Chart(long).mark_circle(size=190, opacity=1, stroke="white", strokeWidth=2).encode(
+    points = alt.Chart(long).mark_circle(size=190, opacity=1, stroke=c["point_stroke"], strokeWidth=2).encode(
         y=y,
         x=alt.X("Score:Q", scale=x_scale),
-        color=alt.Color("Version:N", scale=alt.Scale(domain=["Original", "Tailored"], range=["#94A8D8", "#1E3A8A"]),
+        color=alt.Color("Version:N", scale=alt.Scale(domain=["Original", "Tailored"], range=[c["before"], c["after"]]),
                         legend=alt.Legend(title=None, orient="top", direction="horizontal", labelFontSize=12,
-                                          labelColor="#334155", symbolSize=140, symbolStrokeWidth=0)),
+                                          labelColor=c["text"], symbolSize=140, symbolStrokeWidth=0)),
         tooltip=[alt.Tooltip("Measure:N"), alt.Tooltip("Version:N", title="Resume"),
                  alt.Tooltip("Score:Q"), alt.Tooltip("Change:N", title="Change after tailoring")],
     )
     # Selective direct label: only the tailored endpoint, with the change.
-    labels = alt.Chart(wide).mark_text(dy=-17, fontSize=12, fontWeight=600, color="#0F172A").encode(
+    labels = alt.Chart(wide).mark_text(dy=-17, fontSize=12, fontWeight=600, color=c["ink"]).encode(
         y=y, x=alt.X("Tailored:Q", scale=x_scale), text="Label:N",
     )
     chart = (rule + points + labels).properties(height=78 * len(rows) + 40)
@@ -490,6 +538,9 @@ if "last_result" in st.session_state and "docs" in st.session_state:
             st.session_state[sent_key] = True
             st.toast("Thanks for your feedback!")
 
+    verdict_card(after["requirement_score"], req_after.get("items", []), after["ats_score"],
+                 has_job=bool(request.get("job_description")), stale=req_stale)
+
     change = after["ats_score"] - before["ats_score"]
     meaningful = abs(change) > SCORE_NOISE
     m1, m2, m3, m4 = st.columns(4)
@@ -499,13 +550,16 @@ if "last_result" in st.session_state and "docs" in st.session_state:
         m1.metric("Requirement match", f"{after['requirement_score']}/100",
                   delta="Re-check after your edits" if req_stale else change_label(req_change),
                   delta_color="normal" if req_meaningful else "off", delta_arrow="auto" if req_meaningful else "off",
-                  border=True, help="How a recruiter would judge your resume against each of the job's requirements.")
+                  border=True, help=f"{score_band(after['requirement_score'])[0]}. How a recruiter would judge your "
+                                    "resume against each of the job's requirements. 80+ strong, 65–79 good, "
+                                    "45–64 fair, under 45 a stretch.")
     else:
         m1.metric("Requirement match", "—", border=True,
                   help="Add a job description to see how you match its requirements.")
     m2.metric("ATS match", f"{after['ats_score']}/100", delta=change_label(change),
               delta_color="normal" if meaningful else "off", delta_arrow="auto" if meaningful else "off", border=True,
-              help="Job keywords + semantic similarity, the way ATS software searches. Updates live as you edit.")
+              help=f"{score_band(after['ats_score'])[0]}. Job keywords + semantic similarity, the way ATS software "
+                   "searches. Updates live as you edit. 80+ strong, 65–79 good, 45–64 fair, under 45 a stretch.")
     m3.metric("Experience preserved", f"{completeness.get('completeness_pct', 100)}%", border=True)
     m4.metric("Candidate level", analyzer.get("candidate_level") or "—", border=True)
 
@@ -721,3 +775,62 @@ if "last_result" in st.session_state and "docs" in st.session_state:
     with tab_draft:
         st.caption("The Resume Writer's first draft, before the Human Optimizer polished it.")
         st.markdown(resume_to_html(workflow["resume_writer"]["generated_resume"], template), unsafe_allow_html=True)
+
+# ------------------------------------------------------------------
+# Landing content: shown until the first results exist (results then take this space)
+# ------------------------------------------------------------------
+if "last_result" not in st.session_state:
+    st.write("")
+    st.markdown('<div class="cl-section-title">See the difference</div>'
+                '<div class="cl-section-sub">An example from the sample resume above (a fictional candidate). Same '
+                'facts and the same numbers, rewritten in the language of the job.</div>', unsafe_allow_html=True)
+    st.markdown('''
+<div class="cl-compare">
+  <div class="cl-sample">
+    <div class="cl-sample-label">Original resume</div>
+    <ul>
+      <li>Built and maintained REST APIs serving 1M+ daily requests using Python and FastAPI</li>
+      <li>Deployed microservices on AWS Lambda and ECS, reducing infra costs by 20%</li>
+      <li>Automated CI/CD pipelines using GitHub Actions and Docker</li>
+    </ul>
+    <div class="cl-sample-foot">Job asks for: high-traffic APIs, serverless workloads on AWS, containerization, CI/CD.</div>
+  </div>
+  <div class="cl-sample">
+    <div class="cl-sample-label">Tailored for the job</div>
+    <ul>
+      <li>Built and maintained <mark>high-traffic</mark> REST APIs serving 1M+ daily requests using Python and FastAPI</li>
+      <li>Deployed microservices on AWS, including <mark>serverless workloads</mark> on Lambda and ECS, reducing infrastructure costs by 20%</li>
+      <li>Automated CI/CD pipelines and <mark>containerization</mark> using GitHub Actions and Docker</li>
+    </ul>
+    <div class="cl-sample-foot">Highlighted: the job's own terms, matched to experience the candidate already had.
+    Nothing new was claimed.</div>
+  </div>
+</div>''', unsafe_allow_html=True)
+
+    st.write("")
+    st.markdown('<div class="cl-section-title">Frequently asked questions</div>', unsafe_allow_html=True)
+    faq = [
+        ("Is my resume stored anywhere?",
+         f"No. {APP_NAME} has no accounts and no resume database. Your resume is sent to our AI provider only to "
+         "generate your results, and everything is discarded when you close the tab. See the Privacy page for details."),
+        ("Will it invent experience, skills, or numbers?",
+         "No. Every result passes a claims check: skills, years of experience, and figures that aren't in your "
+         "original resume are removed, and we tell you what was removed. Missing skills are listed for you to add "
+         "yourself, only if you genuinely have them."),
+        ("Why is my score lower than on other sites?",
+         "We score like a recruiter: each job requirement is checked against evidence quoted from your resume, and "
+         "years of experience are calculated from your dates, not guessed. Scores of 65+ are already a good match. "
+         "The How we score page explains every number."),
+        ("Is it free?",
+         f"Yes, with no sign-up. To keep it free for everyone, each session can generate {MAX_GENERATIONS_PER_SESSION} "
+         "applications. Edits, template changes, downloads, and re-scoring don't count."),
+        ("Which files can I upload?",
+         "PDF, Word (DOCX), or plain text. Scanned or image-only PDFs have no readable text, and two-column layouts "
+         "sometimes come out scrambled. We'll warn you if that happens, and you can paste your resume instead."),
+        ("Does a high score guarantee an interview?",
+         "No tool can promise that. A high score means your resume clearly shows what the job asks for, which helps "
+         "you get past ATS filters and a recruiter's first scan."),
+    ]
+    for question, answer in faq:
+        with st.expander(question):
+            st.markdown(answer)

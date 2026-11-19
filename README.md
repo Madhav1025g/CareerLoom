@@ -15,7 +15,11 @@ requirement and ATS match improved, and adds a 15-second recruiter snapshot, a m
 ## Features
 
 **Tailor resume**
-- Upload a resume (PDF, DOCX, or TXT) or paste it, plus the job description
+- Upload a resume (PDF, DOCX, or TXT) or paste it, plus the job description. Uploads are checked for unreadable
+  text (scanned PDFs, broken two-column layouts) before any AI call
+- **Verdict card**: a plain-language summary at the top of the results ("Good match: you meet 7 of 10
+  requirements") with score bands and the top three gaps to address
+- **Step tracker** showing live progress through the pipeline
 - **Job-tailored rewrite** that mirrors the job's terminology and reorders by relevance, never inventing skills or experience
 - **Requirement match**: the job is broken into requirements (experience, skills, knowledge, education, soft skills),
   each judged by meaning with evidence quoted from the resume. Years of experience are calculated in code
@@ -27,12 +31,15 @@ requirement and ATS match improved, and adds a 15-second recruiter snapshot, a m
 - **Cover letter** in three tones (Formal, Friendly, Concise)
 - **Interview prep**: 8 likely questions for the job with STAR answers drawn from your resume
 - Reviewer suggestions with one-click **Apply**, and in-page editing of every document
-- **Four templates** (Professional, Modern, Classic, Compact) for **PDF** and **Word** exports
+- **Four templates** (Professional, Modern, Classic, Compact) for **PDF** and **Word** exports, with a warning
+  (and a one-click Compact fix) when the PDF runs past one page
+- **Light and dark mode**, following the visitor's system setting
 
 **Compare jobs**: score one resume against up to three job descriptions (requirement + ATS match), see the best fit
 first with its biggest gaps, and tailor for it in one click.
 
-**How we score** and **Privacy** pages explain the scoring formula and exactly what happens to user data.
+**How we score**, **Privacy**, **Terms of use**, and **Contact** pages explain the scoring formula, what happens to
+user data, and how to report a problem.
 
 ## Architecture
 
@@ -115,11 +122,14 @@ app_pages/
   compare.py            # Compare jobs
   how_we_score.py       # Scoring explained
   privacy.py            # Data handling
+  terms.py              # Terms of use
+  contact.py            # Report a problem / suggest a feature
 ui_common.py            # Shared styles and helpers
 main.py                 # Agents, orchestrator, RAG, scoring, FastAPI endpoint
 document_builder.py     # Templates + formatting for preview, PDF, and DOCX
 tests/                  # pytest suite (runs offline with a fake LLM)
-.github/workflows/      # CI
+scripts/keep_awake.py   # Visits the live app so Streamlit Cloud never puts it to sleep
+.github/workflows/      # CI: tests, eval quality gate, keep-awake (every 6 hours)
 docs/demo.gif           # README demo
 ```
 

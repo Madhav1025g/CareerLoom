@@ -2,9 +2,12 @@
 import streamlit as st
 
 from main import APP_NAME, KEYWORD_WEIGHT, PIPELINE_STEPS
-from ui_common import page_intro
+from ui_common import SCORE_BANDS, page_intro
 
 keyword_pct = round(KEYWORD_WEIGHT * 100)
+_upper = [100] + [minimum - 1 for minimum, *_ in SCORE_BANDS[:-1]]
+BAND_LINES = "\n".join(f"- **{lo}–{hi}: {label}.** {text}"
+                       for (lo, label, _tone, text), hi in zip(SCORE_BANDS, _upper))
 semantic_pct = 100 - keyword_pct
 
 page_intro(
@@ -47,6 +50,10 @@ software experience"*, *"strong backend fundamentals"*, *"experience with AWS"* 
 - Without a job description, the skills you enter are used for the keyword match instead.
 
 ### Reading your scores
+Our scoring is deliberately strict, so the bands are calibrated to it. A 67 is a good match, not a failing grade:
+
+{BAND_LINES}
+
 - **Small changes (±2 points)** are shown as "about the same" — normal variation, not a real gain or loss.
 - **Skills you don't have stay missing.** {APP_NAME} never adds experience to your resume on its own. If you
   genuinely have a missing skill, add it yourself from the Job match tab.
