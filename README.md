@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Madhav1025g/CareerLoom/actions/workflows/tests.yml/badge.svg)](https://github.com/Madhav1025g/CareerLoom/actions/workflows/tests.yml)
 
-**Live app:** https://careerloom.streamlit.app/
+**Live app:** https://careerloom-ai.streamlit.app/
 
 CareerLoom reads your resume and a job description, checks your resume against each of the job's requirements the
 way a recruiter would, rewrites it for the role (using only experience you actually have), shows how much your

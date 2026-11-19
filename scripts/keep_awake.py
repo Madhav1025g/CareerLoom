@@ -13,7 +13,7 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-APP_URL = "https://careerloom.streamlit.app/"
+APP_URL = "https://careerloom-ai.streamlit.app/"
 WAKE_BUTTON = "Yes, get this app back up!"
 LOADED_TEXT = "Tailor your resume"  # the hero heading on the main page
 
